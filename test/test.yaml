@@ -1,0 +1,13 @@
+version: '0.0'
+description: |
+    This tempate is given for testing purposes only. Keep it here and
+    everything should be ok.
+test:  # a testing section
+    someAlias: 'aliased'
+    aliasDiscovered: 'here must be an $(value:test.someAlias) content'
+    customInterpTest:
+        one : '$(TST:one)'
+        two : '$(TST:two)'
+        four : '$(TST:four)'
+template: |
+    {# This is a testing tamplate #}trivial

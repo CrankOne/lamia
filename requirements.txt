@@ -1,0 +1,13 @@
+pyyaml
+dpath
+jinja2
+
+# Remember this module for possible future use. We'd currently refuse it as it
+# seemed to not support the DAGMan integration.
+#htcondor
+
+# If you need the WUI
+#flask
+
+# Not sure if we will really make of use
+#schema

@@ -1,0 +1,10 @@
+---
+# Generic configuration for Lamia.
+version: 0.1
+
+lamia:
+    backends:
+        HTCondor:
+            nRestartRetries: 3
+            minStatusUpdateTimeSec: 30
+...
