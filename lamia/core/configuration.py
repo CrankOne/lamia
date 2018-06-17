@@ -57,6 +57,7 @@ class Configuration(collections.MutableMapping):
                 pst = urlparse(initObject)
                 if '' == pst.scheme \
                 or 'file' == pst.scheme:
+                    print(initObject, '=', pst)  # XXX
                     with open( pst.path ) as f:
                         cfg = yaml.load( f )
                 # ... elif (more schemes to be supported: http/ftp/etc)

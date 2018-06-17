@@ -48,6 +48,10 @@ loggers:
         level: DEBUG
         handlers: [console]
         propagate: no
+    na58:  # TODO
+        level: DEBUG
+        handlers: [console]
+        propagate: no
 root:
     level: INFO
     handlers: [console, info_file_handler, error_file_handler]

@@ -21,7 +21,7 @@
 
 import os, logging, logging.config, yaml
 
-def setup( default_path='assets/configs/logging.yaml'
+def setup( default_path='logging.yaml'
          , default_level=logging.INFO
          , env_key='LOG_CFG' ):
     """
