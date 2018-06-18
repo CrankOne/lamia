@@ -129,6 +129,10 @@ class Loader(j2.BaseLoader):
         # TODO: seems like stacktrace uses this path to get the line content.
         # Has to somehow trick it in order to display real template line instead
         # of yaml's.
+        # We may get the line number information from YAML file by utilizing
+        # this approach: https://stackoverflow.com/questions/13319067/parsing-yaml-return-with-line-number
+        # And further prepend the template string with commented {#-#} lines to
+        # get the proper line numbering.
         return yObj['template'], pth, lambda: True
 
 class Operation(Enum):
@@ -241,8 +245,9 @@ def render_string( strTmpl, _additionalFilters={}, **kwargs ):
     """
     Renders a string as a anonymous template with existing context.
     """
+    loader = kwargs.get('_loader', j2.BaseLoader)
     try:
-        e = j2.Environment( loader=j2.BaseLoader
+        e = j2.Environment( loader=loader
                           , undefined=j2.StrictUndefined )
         for k, fltr in _additionalFilters.items():
             e.filters[k] = fltr

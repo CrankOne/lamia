@@ -285,8 +285,9 @@ class Paths( collections.MutableMapping ):
                 if dirPath not in self._visited:
                     check_dir( dirPath )
                     self._visited.add(dirPath)
+                # Apply the appropriate handler to generate the leaf node.
                 try:
-                    L.debug( 'Submitting the %s as a leaf node to handler.', p )
+                    L.debug( 'handling the "%s"', p )
                     # The pathCtx will be available within the
                     # template as well.
                     context = copy.copy( tContext )
