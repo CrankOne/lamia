@@ -141,18 +141,47 @@ class ConfigurationStackTest(UT.TestCase):
         self.assertFalse( 'bar.fourteen' in self.stack )
         self.assertTrue( 'one.1' in self.stack )
         del( self.stack['one'] )
+        self.assertFalse( 'one' in self.stack.keys() )
         self.assertFalse( 'one' in self.stack )
         self.assertFalse( 'one.1' in self.stack )
         self.stack.pop()
         self.test_basic_retrieval()
 
+    def test_kwargs_forwarding(self):
+        def _tst_f(s, **kwargs):
+            for k, v in [('one', 1), ('two', 2), ('foo', None), ('some', 'other')]:
+                s.assertEqual( v, kwargs.get(k, None) )
+        self.stack.push({'two' : 2, 'some' : 'other'})
+        del( self.stack['foo'] )
+        self.assertFalse( 'foo' in self.stack.keys() )
+        _tst_f(self, **self.stack )
+
     def test_overriden_iteration(self):
         self.assertEqual( 4, len(self.stack) )
-        self.stack.push( {'one' : [2, 15], 'bar' : {'twelve' : 12, 'thirteen' : 13} } )
+        self.stack.push( { 'one' : [2, 15]
+                         , 'bar' : {'twelve' : 12, 'thirteen' : 13}
+                         } )
         self.assertEqual( 5, len(self.stack) )
         chk = set({ 'one', 'two', 'foo', 'bar', 'some' })
         for k, v in self.stack.items():
             self.assertTrue( k in chk )
             chk.remove(k)
         self.assertFalse(chk)
+        self.stack.pop()
         # ... whatever
+
+    def test_orig_dict_preserved(self):
+        orig = { 'uno' : 1, 'dos' : 2, 'tres' : 3 }
+        self.stack.push( orig )
+        del self.stack['uno']
+        self.assertEqual( orig['uno'], 1 )
+        self.stack.pop()
+
+    def test_orig_cfg_preserved(self):
+        origDct = { 'uno' : 1, 'dos' : 2, 'tres' : 3 }
+        origCfg = Configuration( origDct )
+        self.stack.push( origCfg )
+        del self.stack['uno']
+        self.assertEqual( origDct['uno'], 1 )
+        self.assertEqual( origCfg['uno'], 1 )
+        self.stack.pop()

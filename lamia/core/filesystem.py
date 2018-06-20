@@ -1,6 +1,7 @@
 import os, errno, collections, re, dpath, yaml, itertools, logging, copy, glob \
      , contextlib
 import lamia.core.interpolation
+import lamia.core.configuration
 from string import Formatter
 
 """
@@ -261,7 +262,12 @@ class Paths( collections.MutableMapping ):
             , indent=1 )
 
     def _generate( self, root, path, fs
-            , pathCtx={}, leafHandler=None, tContext={} ):
+            , pathCtx={}
+            , leafHandler=None
+            , tContext={} ):
+        """
+        Generates the particular node (file or directory) recursively.
+        """
         L = logging.getLogger('lamia.filesystem')
         for k, v in fs.items():
             np = path + [k]
@@ -285,22 +291,37 @@ class Paths( collections.MutableMapping ):
                 if dirPath not in self._visited:
                     check_dir( dirPath )
                     self._visited.add(dirPath)
+                # Update the pathCtx with pathContext here
+                if isinstance( pathCtx, lamia.core.configuration.Stack ):
+                    pathCtx.push( pathContext
+                                , tag='recursive-path-subst' )
+                elif type( pathCtx ) is dict:
+                    pathCtx = copy.deepcopy( pathContext )
+                else:
+                    raise TypeError( type(pathCtx) )
+                # Take care of the entites that are not presented in current
+                # context within the runtime stack (explicitly mark them as
+                # deleted) since path context shall contain ONLY the keys
+                # consumed within current path.
+                for pathKey in pathCtx.keys():
+                    if pathKey not in pathContext.keys():
+                        del pathCtx[pathKey]
                 # Apply the appropriate handler to generate the leaf node.
                 try:
                     L.debug( 'handling the "%s"', p )
                     # The pathCtx will be available within the
                     # template as well.
-                    context = copy.copy( tContext )
+                    context = copy.deepcopy( tContext )
+                    if 'p' in context.keys():
+                        L.warning( 'The "p" is already in'
+                                ' template\'s context. Preserving it.' )
+                    else:
+                        context['p'] = pathCtx
                     if 'paths' in context.keys():
                         L.warning( 'The "paths" is already in'
                                 ' template\'s context. Preserving it.' )
                     else:
                         context['paths'] = self
-                    if 'pathContext' in context.keys():
-                        L.warning( 'The "pathContext" is already in'
-                                ' template\'s context. PReserving it.' )
-                    else:
-                        context['pathContext'] = pathContext
                     leafHandler( self._files[templatePath]
                                , path=p
                                , context=context )
@@ -308,6 +329,9 @@ class Paths( collections.MutableMapping ):
                     L.error( 'During handler invokation for node: %s'
                            , p )
                     raise
+                finally:
+                    if isinstance( pathCtx, lamia.core.configuration.Stack ):
+                        pathCtx.pop( tag='recursive-path-subst' )
 
     def create_on( self, root, pathCtx={}, tContext={}, leafHandler=None ):
         self._visited = set()

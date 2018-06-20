@@ -1,0 +1,13 @@
+template: |
+    {% set tst = 'thing' %}
+    {{a}}
+    {% context_stack_push cfg, 'foo', b=tst %}
+    {{a}}, {{b}}
+    {%- context_stack_pop cfg, 'foo' %}
+    {{a}}
+version: '0.0'
+description: |
+    This tempate is given for testing purposes only. The functions within this
+    template are currently not supported. See the
+    lamia.core.templates.ContextStack class for details of planned
+    implementation.

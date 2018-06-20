@@ -57,7 +57,6 @@ class Configuration(collections.MutableMapping):
                 pst = urlparse(initObject)
                 if '' == pst.scheme \
                 or 'file' == pst.scheme:
-                    print(initObject, '=', pst)  # XXX
                     with open( pst.path ) as f:
                         cfg = yaml.load( f )
                 # ... elif (more schemes to be supported: http/ftp/etc)
@@ -71,9 +70,11 @@ class Configuration(collections.MutableMapping):
             cfg = copy.deepcopy(initObject)
         elif type(initObject) is None:
             initObject = {}
+        elif isinstance(initObject, Configuration):
+            cfg = copy.deepcopy(initObject._store)
         for k, v in switches.items():
             try:
-                cfg[v[1]] = copy.copy(cfg[k][v[0]])
+                cfg[v[1]] = copy.deepcopy(cfg[k][v[0]])
             except KeyError:
                 L.error( 'Available keys: %s.'%(', '.join(cfg.keys())) )
             del(cfg[k])
@@ -83,6 +84,9 @@ class Configuration(collections.MutableMapping):
             self._interpolators['value'] = ConfigInterpolator(cfg)
         interpolated = self._interpolators( cfg )
         self._store = dict( interpolated )
+
+    def __deepcopy__(self, memo):
+        return Configuration(self)
 
     def __contains__(self, k):
         if DPSP in k:
@@ -156,8 +160,7 @@ class Stack(collections.MutableMapping):
             except KeyError:
                 continue
             if type(val) is Stack._Deleted:
-                raise KeyError( 'The "%s" entry was explicitly deleted'
-                        ' from configuration.' )
+                raise KeyError( 'The "%s" entry was explicitly deleted.'%pth )
             return val
         raise KeyError( pth )
 
@@ -179,7 +182,7 @@ class Stack(collections.MutableMapping):
 
     def __contains__(self, k):
         for tag, c in reversed( self._stack ):
-            if k in c:
+            if k in c.keys():
                 try:
                     val = c[k]
                 except( lamia.core.interpolation.InterpolationTypeError ) as e:
@@ -192,9 +195,11 @@ class Stack(collections.MutableMapping):
         keysPassed = set({})
         for tag, c in reversed(self._stack):
             for k, v in c.items():
-                if k not in keysPassed \
-                and not isinstance(v, Stack._Deleted) :
+                if k not in keysPassed:
                     keysPassed.add(k)
+                else:
+                    continue
+                if not isinstance(v, Stack._Deleted) :
                     yield k
 
     def __len__(self):
@@ -210,8 +215,8 @@ class Stack(collections.MutableMapping):
         Only dict/Configuration instances are allowed. Otherwise, type error
         will be raised.
         """
-        if not isinstance( c, Configuration ):
-            c = Configuration(c)
+        # Copy original, even if it is already a configuration
+        c = Configuration( c )
         self._stack.append( (tag, c) )
 
     def pop( self, tag=None ):

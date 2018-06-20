@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import yaml, os, fnmatch, logging, datetime, copy
 import jinja2 as j2
+import jinja2.lexer, jinja2.ext
 import lamia.core.configuration as LC
 import lamia.core.filesystem as FS
 from enum import Enum
@@ -193,7 +194,8 @@ class Templates(object):
     def __init__( self, templatesDirs
                 , loaderInterpolators=None
                 , mode=Operation.GENERATE
-                , additionalFilters={} ):
+                , additionalFilters={}
+                , extensions=[] ):
         self.mode = mode
         # Require target dir to be accessible and actually a dir (or a symlink
         # to dir)
@@ -205,7 +207,8 @@ class Templates(object):
         self.loaderInterpolators = loaderInterpolators
         self.loader = Loader(templatesDirs, interpolators=self.loaderInterpolators)
         self.env = j2.Environment( loader=self.loader
-                , undefined=j2.StrictUndefined )
+                                 , undefined=j2.StrictUndefined
+                                 , extensions=extensions )
         for k, fltr in additionalFilters.items():
             self.env.filters[k] = fltr
 
@@ -235,19 +238,19 @@ class Templates(object):
             L.warning( 'Template renderer "default" is overriden when'
                     ' deploying FS structure.' )
         renderers['default'] = self
-        tContext = copy.copy( templateContext )
         fs.create_on( root
                 , pathCtx=pathTemplateArgs
-                , tContext=tContext
+                , tContext=copy.deepcopy(templateContext)
                 , leafHandler=_RecursiveTemplatesHandler(renderers=renderers) )
 
-def render_string( strTmpl, _additionalFilters={}, **kwargs ):
+def render_string( strTmpl, _additionalFilters={}, _extensions=[], **kwargs ):
     """
     Renders a string as a anonymous template with existing context.
     """
     loader = kwargs.get('_loader', j2.BaseLoader)
     try:
         e = j2.Environment( loader=loader
+                          , extensions=_extensions
                           , undefined=j2.StrictUndefined )
         for k, fltr in _additionalFilters.items():
             e.filters[k] = fltr
@@ -258,4 +261,31 @@ def render_string( strTmpl, _additionalFilters={}, **kwargs ):
         L.error( 'during rendering of string """%s""" with context %s',
                 strTmpl, str(dict(kwargs)))
         raise
+
+class ContextStack(jinja2.ext.Extension):
+    """
+    TODO: extension class is not yet implemented. In principle, it has to
+    provide some restrictive failsafe logic for operating with configuration
+    context (see lamia.core.configuration.Stack class). But implementation of
+    the full-fledged tag was postponed --- we just use jinja2.ext.do in
+    combination with direct operations.
+    ...
+    An extension manipulating the context stack (Stack class of the
+    lamia.core.configuration). Every stack-pushing instruction has to be
+    finalized by corresponding stack-popping one.
+    """
+    tags = set(['context_stack_push', 'context_stack_pop'])
+
+    def __init__(self, environment):
+        raise NotImplementedError('See notes in lamia/tests/')
+        super(ContextStack, self).__init__(environment)
+        #environment.extend(???)
+
+    def parse(self, parser):
+        # The parser.stream returns instances of jinja2.lexer.Token.
+        tagTok = next( parser.stream )
+        while parser.stream.current.type != jinja2.lexer.TOKEN_BLOCK_END:
+            tok = next( parser.stream )
+            print( '%s <= %s'%(tok, tok.type) )  #XXX
+        #ctxRef = jinja2.ext.nodes.ContextReference()
 

@@ -1,3 +1,5 @@
+template: |
+    {# This is a testing tamplate #}trivial
 version: '0.0'
 description: |
     This tempate is given for testing purposes only. Keep it here and
@@ -9,5 +11,3 @@ test:  # a testing section
         one : '$(TST:one)'
         two : '$(TST:two)'
         four : '$(TST:four)'
-template: |
-    {# This is a testing tamplate #}trivial
