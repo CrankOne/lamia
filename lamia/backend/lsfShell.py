@@ -4,7 +4,7 @@ import lamia.core.templates
 
 
 """
-The rotuines for task submission on HTCondor clusters steered by BASH script.
+The rotuines for task submission on LSF clusters steered by BASH script.
 """
 
 def generate_subtree( t, root, task, fs
@@ -12,10 +12,11 @@ def generate_subtree( t, root, task, fs
                     , templateContext={}
                     , renderers={} ):
     """
-    Generates directory structure for HTCondor to perform the operations.
+    Generates directory structure for LSF to perform the operations.
     """
     t.deploy_fs_struct( root, fs
                       , pathTemplateArgs=pathTemplateArgs
                       , templateContext=templateContext
                       , renderers=renderers )
+
 
