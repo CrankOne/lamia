@@ -9,7 +9,7 @@ formatters:
 handlers:
     console:
         class: logging.StreamHandler
-        level: DEBUG
+        level: WARNING
         formatter: condensed
         stream: ext://sys.stdout
 
@@ -42,15 +42,15 @@ handlers:
 loggers:
     __main__:
         level: DEBUG
-        handlers: []
-        propagate: yes
+        handlers: [console, info_file_handler, error_file_handler, debug_file_handler]
+        propagate: no
     lamia:
         level: DEBUG
-        handlers: [console]
+        handlers: [console, info_file_handler, error_file_handler, debug_file_handler]
         propagate: no
     na58:  # TODO
         level: DEBUG
-        handlers: [console]
+        handlers: [console, info_file_handler, error_file_handler, debug_file_handler]
         propagate: no
 root:
     level: INFO

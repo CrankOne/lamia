@@ -21,14 +21,14 @@
 
 import os, logging, logging.config, yaml
 
-def setup( default_path='logging.yaml'
-         , default_level=logging.INFO
-         , env_key='LOG_CFG' ):
+def setup( defaultPath='logging.yaml'
+         , defaultLevel=logging.INFO
+         , envKey='LOG_CFG' ):
     """
     Setup logging configuration
     """
-    path = default_path
-    value = os.getenv(env_key, None)
+    path = defaultPath
+    value = os.getenv(envKey, None)
     if value:
         path = value
     if os.path.exists(path):
@@ -36,5 +36,5 @@ def setup( default_path='logging.yaml'
             config = yaml.safe_load(f.read())
         logging.config.dictConfig(config)
     else:
-        logging.basicConfig(level=default_level)
+        logging.basicConfig(level=defaultLevel)
 

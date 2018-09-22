@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-import yaml, dpath.util, copy, collections, logging
+import yaml, dpath.util, copy, collections, logging, sys \
+     , configparser, json, yaml
 import lamia.core.interpolation
 from io import IOBase
 from urllib.parse import urlparse
@@ -10,9 +11,64 @@ Lamia module configuration files processing module.
 """
 
 DPSP = '.'
+gSupportedShebangs = set({'// JSON', '# YAML', '; INI'})
 
 class StackTagError(RuntimeError):
     pass
+
+def parse_context_stream( argsFPath ):
+    """
+    Accepts file path and parses it into the python dictionary. The following
+    extensions are allowed:
+        - .json, .js, .JSON, .JS -- for JSON file format
+        - .yaml, .YAML -- for YAML file format
+        - .ini, .INI -- for INI config file format
+    If '-' specified as file path, will try to read from STDIN. The first line
+    given will be considered as a shebang describing the input format, and
+    following will be interpreted:
+        '// JSON' -- for JSON data (other comments aren't supported within the
+            file)
+        '# YAML' -- for YAML data
+        '; INI' -- for INI config.
+    If format is not recognized, raises RunTimeError().
+    """
+    L = logging.getLogger(__name__)
+    cfg = None
+    if '-' == argsFPath:
+        fmt = ''
+        while '' == fmt:
+            fmt = sys.stdin.readline()[:-1]
+        if fmt not in gSupportedShebangs:
+            raise RuntimeError('The "%s" string is not a format-description.'
+                    ' Expected are: "%s".'%(fmt, '", "'.join(gSupportedShebangs)) )
+        argsText = sys.stdin.read()
+        L.debug( 'Argument input of format "%s" of length has been %d slurped.'%(fmt, len(argsText)) )
+        if '; INI' == fmt:
+            iniCfg = configparser.ConfigParser()
+            iniCfg.read_string(argsText)
+            cfg = dict(iniCfg._sections)
+        elif '// JSON' == fmt:
+            cfg = dict(json.loads(argsText))
+        elif '# YAML' == fmt:
+            cfg = yaml.load(argsText)
+        else:
+            # Impossible stub:
+            raise AssertionError('Format recognized, but not being parsed.')
+    elif len(argsFPath) > 4 and '.ini' == argsFPath[-4:]:
+        iniCfg = configparser.ConfigParser()
+        iniCfg.read(argsFPath)
+        cfg = dict(iniCfg._sections)
+    elif len(argsFPath) > 5 and '.yaml' == argsFPath[-5:]:
+        with open(argsFPath, 'r') as f:
+            cfg = dict(yaml.load(f))
+    elif len(argsFPath) > 5 and '.json' == argsFPath[-5:]:
+        with open(argsFPath) as f:
+            cfg = dict(json.load(f))
+    else:
+        pass  # do nothing, leave cfg being `None'
+    if cfg is None:
+        raise RuntimeError( 'Unrecognized format for context input "%s".'%argsFPath )
+    return cfg
 
 class ConfigInterpolator(object):
     """
