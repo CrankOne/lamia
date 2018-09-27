@@ -22,7 +22,7 @@ def parse_context_stream( argsFPath ):
     extensions are allowed:
         - .json, .js, .JSON, .JS -- for JSON file format
         - .yaml, .YAML -- for YAML file format
-        - .ini, .INI -- for INI config file format
+        - .ini, .INI, .cfg -- for INI config file format
     If '-' specified as file path, will try to read from STDIN. The first line
     given will be considered as a shebang describing the input format, and
     following will be interpreted:
@@ -54,7 +54,7 @@ def parse_context_stream( argsFPath ):
         else:
             # Impossible stub:
             raise AssertionError('Format recognized, but not being parsed.')
-    elif len(argsFPath) > 4 and '.ini' == argsFPath[-4:]:
+    elif len(argsFPath) > 4 and ('.ini' == argsFPath[-4:] or '.cfg' == argsFPath[-4:]):
         iniCfg = configparser.ConfigParser()
         iniCfg.read(argsFPath)
         cfg = dict(iniCfg._sections)
@@ -113,8 +113,8 @@ class Configuration(collections.MutableMapping):
                 pst = urlparse(initObject)
                 if '' == pst.scheme \
                 or 'file' == pst.scheme:
-                    with open( pst.path ) as f:
-                        cfg = yaml.load( f )
+                    # TODO: support not only the YAML
+                    cfg = parse_context_stream( pst.path )
                 # ... elif (more schemes to be supported: http/ftp/etc)
                 else:
                     raise NotImplementedError( "URI Scheme \"%s\" is not yet supported."%pst.scheme )

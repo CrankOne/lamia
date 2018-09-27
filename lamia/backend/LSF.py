@@ -23,7 +23,7 @@ import shlex, subprocess, re, logging, sys, copy
 import lamia.backend.interface
 
 # A regex to parse the LSF message about job being successfully submitted:
-rxJobSubmitted = re.compile(r'^Job <(?P<jid>\d+)> is submitted to default queue <(?P<queue>[^>]+)>\.$')
+rxJobSubmitted = re.compile(r'^Job <(?P<jID>\d+)> is submitted to default queue <(?P<queue>[^>]+)>\.$')
 # Default backend-specific settings:
 gDefaults = {
         # Where to find executables responsible for various tasks
@@ -45,16 +45,15 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
     def backend_type():
         return 'LSF'
 
-    def __init__(self, cfg={}):
-        self.cfg = lamia.core.configuration.Stack()
-        self.cfg.push(gDefaults)
-        self.cfg.push(cfg)
+    def __init__( self, config ):
+        super().__init__(config)
 
-    def submit( self
-              , cmd=None
-              , timeout=15
-              , submArgs={}
-              , popenKwargs={} ):
+    def submit( self, jobName
+                    , cmd=None
+                    , stdout=None, stderr=None
+                    , timeout=30
+                    , submArgs={}
+                    , popenKwargs={} ):
         """
         Will forward `cmd' as a string or a tuple within the `subprocess.Popen'
         call treating its return code and stdout/stderr.
@@ -68,36 +67,33 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         cmd_ = [self.cfg['execs.bsub']]
         bsubArgs = copy.deepcopy(self.cfg['bsub'])
         bsubArgs.update(submArgs)
-        # Checks for some important LSF submission arguments. In principle,
-        # must be overriden by the copied defaults.
-        if 'J' not in bsubArgs.keys():
-            L.warning( 'No name given for LSF job instance.' )
-        if 'q' not in bsubArgs.keys():
-            L.warning( 'No queue has been specified for LSF job instance.' )
-        if 'o' not in bsubArgs.keys() \
-        and 'oo' not in bsubArgs.keys():
-            L.warning( 'No stdout logging has been specified for LSF job instance.' )
-        if 'o' not in bsubArgs.keys() \
-        and 'eo' not in bsubArgs.keys():
-            L.warning( 'No stderr logging has been specified for LSF job instance.' )
         # Form the LSF submission arguments
         for k, v in bsubArgs.items():
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
+        cmd_.append( '-J %s'%jobName )
+        cmd_.append( '-oo %s'%stdout )
+        cmd_.append( '-eo %s'%stderr )
         #- Append the command:
         stdinCmds = None
-        if type(cmd) is None or (type(cmd) is str and '-' == cmd):
+        if type(cmd) is None \
+        or (type(cmd) is str and '-' == cmd) \
+        or not cmd:
             stdinCmds = ''
             # Read from stdin
             for line in sys.stdin:
-                stdinCmds.append(line)
+                stdinCmds += line
+            L.debug( "Stdin input: %s"%stdinCmds )
+            if not stdinCmds:
+                raise ValueError( "Empty stdin input given for job submission." )
         elif type(cmd) is str:
             cmd_ += shlex.split(cmd)
         elif type(cmd_) is not list:
             raise TypeError( "Forst argument for submit is expected to be' \
                     ' either str or list. Got %s."%type(cmd) )
-        cmd_ += copy.deepcopy(cmd)
+        if cmd:
+            cmd_ += copy.deepcopy(cmd)
         # Submit the job and check its result.
         try:
             # Sets the default popen's kwargs and override it by user's kwargs
@@ -105,7 +101,14 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                                 , 'stderr' : subprocess.PIPE })
             pkw.update(popenKwargs)
             submJob = subprocess.Popen( cmd_, **pkw )
+            L.debug('Performing subprocess invocation:')
+            L.debug("  $ %s"%(' '.join(cmd_)
+                            , '<input from stdin>' if stdinCmds is not None else '' ))
+            L.debug("Supplementary popen() arguments: %s."%str(pkw) )
             if stdinCmds is not None:
+                L.debug( "--- begin of forwarded input from stdin ---" )
+                L.debug( stdinCmds )
+                L.debug( "--- end of forwarded input from stdin ---" )
                 out, err = submJob.communicate( input=stdinCmds, timeout=timeout )
             else:
                 out, err = submJob.communicate( timeout=timeout )
@@ -118,7 +121,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                     output={ 'stdout' : out
                            , 'stderr' : err
                            , 'rc' : rc })
-        return m.groupdict()['jid'], m.groupdict()['queue']
+        return m.groupdict()['jID'], m.groupdict()['queue']
 
     def get_status(self, jID, popenKwargs={}):
         """
