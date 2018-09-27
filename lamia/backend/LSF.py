@@ -23,7 +23,7 @@ import shlex, subprocess, re, logging, sys, copy
 import lamia.backend.interface
 
 # A regex to parse the LSF message about job being successfully submitted:
-rxJobSubmitted = r'^Job <(?P<jid>\d+)> is submitted to default queue <(?P<queue>[^>]+)>\.$'
+rxJobSubmitted = re.compile(r'^Job <(?P<jid>\d+)> is submitted to default queue <(?P<queue>[^>]+)>\.$')
 # Default backend-specific settings:
 gDefaults = {
         # Where to find executables responsible for various tasks
@@ -110,10 +110,10 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             else:
                 out, err = submJob.communicate( timeout=timeout )
             rc = submJob.returncode
-            m = rxJobSubmitted.match( out )
+            m = rxJobSubmitted.match( out.decode('ascii') )
         except Exception as e:
             raise lamia.backend.interface.SubmissionFailure( exception=e )
-        if m or 0 != rc:
+        if not m or 0 != rc:
             raise lamia.backend.interface.SubmissionFailure(
                     output={ 'stdout' : out
                            , 'stderr' : err

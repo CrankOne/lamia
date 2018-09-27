@@ -23,10 +23,11 @@ import abc, os, logging, sys, copy, argparse
 import lamia.core.configuration, lamia.logging
 
 class SubmissionFailure(RuntimeError):
-    def __init__(self, output={}, exception=None):
+    def __init__(self, output={'stdout':None, 'stderr':None, 'rc':None}
+                     , exception=None):
         self.output = output
         self.exception = exception
-        message = "Job submission error occured. "
+        message = "Job submission error occured."
         if self.exception:
             message += "An \"%s\" exception occured while subprocessing."%(str(exception))
         else:
@@ -146,7 +147,17 @@ def main():
     L.debug( 'Invoked with: %s'%(str(args)) )
     B = c()
     if 'submit' == args.procedure:
-        r = B.submit( args.fwd )
+        try:
+            r = B.submit( args.fwd )
+        except SubmissionFailure as e:
+            sys.stderr.write( 'Submission error occured: rc=%d\n'%e.output['rc'] )
+            if not e.exception:
+                sys.stderr.write( '<submission command stdout>:\n' )
+                sys.stderr.write( e.output['stdout'].decode('ascii') )
+                sys.stderr.write( '<submission command stderr>:\n' )
+                sys.stderr.write( e.output['stderr'].decode('ascii') )
+            else:
+                sys.stderr.write( e.exception )
     elif 'kill' == args.procedure:
         raise NotImplementedError('LSF-kill')  # TODO
     elif 'status' == args.procedure:
