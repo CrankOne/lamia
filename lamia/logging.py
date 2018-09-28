@@ -23,23 +23,26 @@ import os, logging, logging.config, yaml
 
 gColoredPrfxs = {
         logging.CRITICAL : "\033[41;1;11m\u2592E\033[0m",
-        logging.ERROR    : "\033[31;1;11m\u2591E\033[0m",
-        logging.WARNING  : "\033[33;1;11m\u2591W\033[0m",
-        logging.INFO     : "\033[34;1;11m\u2591I\033[0m",
+        logging.ERROR    : "\033[31;1;11m\u2591e\033[0m",
+        logging.WARNING  : "\033[33;1;11m\u2591w\033[0m",
+        logging.INFO     : "\033[34;1;11m\u2591i\033[0m",
         logging.DEBUG    : "\033[34;2;11m\u2591D\033[0m",
         logging.NOTSET   : "\033[31;2;11m\u2591?\033[0m"
     }
 
 class ConsoleColoredFormatter(logging.Formatter):
     def format( self, record ):
-        return gColoredPrfxs[record.level] \
-                + ' ' + super(ConsoleColoredFormatter, self).format(record)
+        m = super(ConsoleColoredFormatter, self).format(record)
+        m = gColoredPrfxs[record.levelno] + ' ' + m
+        return m
 
 def setup( defaultPath='logging.yaml'
-         , defaultLevel=logging.INFO
+         , defaultLevel=logging.DEBUG
          , envKey='LAMIA_LOG_CFG' ):
     """
     Setup logging configuration.
+    Note, that for `root' logger the level will be set to DEBUG once the global
+    shell variable is set.
     """
     path = defaultPath
     value = os.getenv(envKey, None)
@@ -48,6 +51,8 @@ def setup( defaultPath='logging.yaml'
     if os.path.exists(path):
         with open(path, 'rt') as f:
             config = yaml.safe_load(f.read())
+        if os.getenv('DEBUG', None):
+            config['root']['level'] = 'DEBUG'
         logging.config.dictConfig(config)
     else:
         logging.basicConfig(level=defaultLevel)
