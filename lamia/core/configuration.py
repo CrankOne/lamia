@@ -41,7 +41,9 @@ def parse_context_stream( argsFPath ):
     """
     L = logging.getLogger(__name__)
     cfg = None
-    if '-' == argsFPath:
+    if type(argsFPath) is not str:
+        raise ValueError('String expected, got: %s'%type(argsFPath))
+    elif '-' == argsFPath:
         fmt = ''
         while '' == fmt:
             fmt = sys.stdin.readline()[:-1]
