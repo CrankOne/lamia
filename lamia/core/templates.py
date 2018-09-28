@@ -229,6 +229,16 @@ class Templates(object):
     def deploy_fs_struct( self, root, fs, pathTemplateArgs
                         , renderers={}
                         , templateContext={} ):
+        """
+        Performs deployment of filesystem structure subtree according to fiven
+        subtree description and template-rendering context.
+        @root -- base dir for subtree deployment
+        @fs -- subtree manifest (description) document
+        @pathTemplateArgs -- template context for path rendering
+        @renderers -- supplementary template renderers
+        @templateContext -- a dict-like context object for template rendering
+        (usually a lamia.core.configuration.Stack object).
+        """
         L = logging.getLogger('lamia.templates')
         if not isinstance(fs, FS.Paths ):
             raise TypeError( "lamia.core.filesystem.Paths object expected"

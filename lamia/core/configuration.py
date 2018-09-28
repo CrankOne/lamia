@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import yaml, dpath.util, copy, collections, logging, sys \
-     , configparser, json, yaml
+     , configparser, json, yaml, re, argparse
 import lamia.core.interpolation
 from io import IOBase
 from urllib.parse import urlparse
@@ -12,6 +12,13 @@ Lamia module configuration files processing module.
 
 DPSP = '.'
 gSupportedShebangs = set({'// JSON', '# YAML', '; INI'})
+
+gRxConfExpr=re.compile(r'^~?[A-Za-z_][\w.-]+(?:[+-]?=.+)?$')
+gRxConfExprSemantics = {
+        'decl-scalar' : re.compile( r'^(?P<name>[A-Za-z][\w.-]+)=(?P<value>(?:\\,|[^,\n])+)$' ),
+        'undef'  : re.compile( r'^~(?P<name>[A-Za-z][\w.-]+)$' )
+        # TODO: 'modify-list', 'declare-list', etc.
+    }
 
 class StackTagError(RuntimeError):
     pass
@@ -86,6 +93,18 @@ class ConfigInterpolator(object):
             raise NotImplementedError("Cfg ops aren't yet supported.")  # TODO
         return dpath.util.get(self.dct, strval, separator=DPSP)
 
+def conf_arg_expr(expr):
+    """
+    argparse's custom validator for config-manipulation expressions.
+    """
+    # NOTE useful pattern: ^(?P<name>[^=]+)(?<!\\)=(?P<val>.+)$
+    m = gRxConfExpr.match(expr)
+    if not m:
+        raise argparse.ArgumentTypeError( "'{}' is not a valid lamia.config"
+                " expression.".format(expr))
+    return expr
+
+
 class Configuration(collections.MutableMapping):
     """
     Configuration representated as mutable mapping with shortened element
@@ -102,7 +121,7 @@ class Configuration(collections.MutableMapping):
         One can construct the configuration either from the string value, or
         from file by the given path.
         """
-        L = logging.getLogger('lamia.configuration')
+        L = logging.getLogger(__name__)
         if not interpolators:
             self._interpolators = lamia.core.interpolation.Processor()
         else:
@@ -281,4 +300,31 @@ class Stack(collections.MutableMapping):
         and self._stack[-1][0] != tag:
             raise StackTagError( 'Has: %s, tried: %s.'%( self._stack[-1][0], tag) )
         self._stack.pop()
+
+    def argparse_override(self, overrideExpr):
+        """
+        Utilizes expressions validated by ConfigArgType.
+        """
+        L = logging.getLogger(__name__)
+        expr = {}
+        for action, rx in gRxConfExprSemantics.items():
+            m = rx.match(overrideExpr)
+            if not m: continue
+            expr = m.groupdict()
+            expr['do'] = action
+            break
+        if not expr:
+            raise ValueError("Unable to interpret config-modifying expression"
+                    " \"%s\"."%overrideExpr )
+        if 'decl-scalar' == expr['do']:
+            self[expr['name']] = expr['value']
+            L.debug( 'Entry "%s" := "%s" defined in conf stack.'%(
+                                        expr['name'], expr['value'] ) )
+        elif 'undef' == expr['do']:
+            del(self[expr['name']])
+            L.debug( 'Entry "%s" deleted from stack.'%( expr['name'] ) )
+        else:
+            # TODO ...
+            raise NotImplementedError('TODO: support for "%s"'
+                    ' conf-overriding action.')
 

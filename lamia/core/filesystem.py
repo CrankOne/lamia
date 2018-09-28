@@ -1,7 +1,6 @@
 import os, errno, collections, re, dpath, yaml, itertools, logging, copy, glob \
-     , contextlib
-import lamia.core.interpolation
-import lamia.core.configuration
+     , contextlib, argparse
+import lamia.core.interpolation, lamia.core.configuration
 from string import Formatter
 
 """
