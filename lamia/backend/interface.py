@@ -155,12 +155,12 @@ def argparse_add_common_args(p):
     p.add_argument( '--backend-config', help="Configuration file for the backend to"
             " be used.", required=False )
 
-def job_submit_main(args):
+def job_submit_main(cmdArgs):
     """
     Defines argument parser object for possible future usage.
     """
     L = logging.getLogger(__name__)
-    L.debug('job_submit() invoked with: %s'%str(args))
+    L.debug('job_submit() invoked with: %s'%str(cmdArgs))
     p = argparse.ArgumentParser( description="A job-submission wrapper for LSF.")
     p.add_argument( '-f', '--result-format', help="Sepcifies the form of" \
             " message being printed back upon successfull job submission." \
@@ -171,12 +171,12 @@ def job_submit_main(args):
             " job's stdout has to be written." )
     p.add_argument( '-e', '--stderr-log', help="Specifies a file where" \
             " job's stdout has to be written." )
-    p.add_argument( -J, '--job-name', help="A name of the job."
+    p.add_argument( '-J', '--job-name', help="A name of the job."
                   , required=True )
     p.add_argument( 'fwd', nargs=argparse.REMAINDER )
     argparse_add_common_args(p)
-    args = p.parse_args(args)
-    L.debug( 'Invoked with: %s'%(str(args)) )
+    args = p.parse_args(cmdArgs)
+    L.debug( 'Parsed: %s'%(str(args)) )
     submArgs={}
     for strPair in args.argument or []:
         m = rxArg.match(strPair)
@@ -192,7 +192,7 @@ def job_submit_main(args):
                     args.backend ))
             continue
         submArgs[m.groupdict()['key']] = m.groupdict()['value']
-    B = instantiate_backend(args.backend, args.config)
+    B = instantiate_backend(args.backend, args.backend_config)
     try:
         r = B.submit( args.job_name
                     , cmd=args.fwd
@@ -207,7 +207,7 @@ def job_submit_main(args):
             L.error( e.output['stderr'].decode('ascii') )
         else:
             L.exception( e.exception )
-    print( args.result_format.format(**r) )
+    #print( args.result_format.format(**r) )
     return 0
 
 def main():
