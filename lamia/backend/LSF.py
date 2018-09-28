@@ -75,6 +75,8 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         cmd_.append( '-J %s'%jobName )
         cmd_.append( '-oo %s'%stdout )
         cmd_.append( '-eo %s'%stderr )
+        print(cmd_)  # XXX
+        raise RuntimeError('stub')  # XXX
         #- Append the command:
         stdinCmds = None
         if type(cmd) is None \

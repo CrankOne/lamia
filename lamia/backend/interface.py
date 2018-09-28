@@ -22,7 +22,7 @@
 import abc, os, logging, sys, copy, argparse, re
 import lamia.core.configuration, lamia.logging
 
-rxArg = re.compile(r'^(?P<key>\w+)(?P<backend>:\w+)?=(?P<value>.*)$')
+rxArg = re.compile(r'^(?P<key>\w+):(?P<backend>\w+)?=(?P<value>.*)$')
 
 class SubmissionFailure(RuntimeError):
     def __init__(self, output={'stdout':None, 'stderr':None, 'rc':None}
@@ -152,8 +152,8 @@ def argparse_add_common_args(p):
                     if len(BatchBackend.__subclasses__()) else \
             'None back-ends are available. Consider loading some prior to' \
             'run this code.'), required=True )
-    p.add_argument( '--backend-config', help="Configuration file for the backend to"
-            " be used.", required=False )
+    p.add_argument( '--backend-config', help="Configuration file for the"
+            " backend to be used.", required=False )
 
 def job_submit_main(cmdArgs):
     """
@@ -214,6 +214,7 @@ def main():
     """
     Function routing to certain procedure.
     """
+    lamia.logging.setup()
     L = logging.getLogger(__name__)
     procedure = sys.argv[1] if len(sys.argv) > 1 else ''
     if 'submit' == procedure:
@@ -234,7 +235,6 @@ def main():
         return 1
 
 if "__main__" == __name__:
-    lamia.logging.setup(defaultPath='lamia/assets/configs/logging.yaml')
     ret = main()
     sys.exit(ret)
 
