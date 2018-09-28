@@ -1,5 +1,5 @@
-import os, errno, collections, re, dpath, yaml, itertools, logging, copy, glob \
-     , contextlib, argparse
+import os, sys, errno, collections, re, dpath, yaml, itertools, logging, copy \
+     , glob, contextlib, argparse
 import lamia.core.interpolation, lamia.core.configuration
 from string import Formatter
 
@@ -142,6 +142,25 @@ def pushd(newDir):
     finally:
         L.debug( 'popd(%s)'%prevDir )
         os.chdir(prevDir)
+
+# Custom wrapper to consider stdout as file descriptor. Helps to avoid
+# duplication in cases when user code may specify stdout ('-') as an output
+# location. Based on:
+@contextlib.contextmanager
+def smart_open(filename=None, mode='w'):
+    if filename and filename != '-':
+        fh = open(filename, mode)
+    elif '-' == filename and 'w' in mode:
+        fh = sys.stdout
+    elif '-' == filename and 'r' in mode:
+        fh = sys.stdin
+    else:
+        raise ValueError( "Unable to open \"%s\" on '%s' mode."%(filename, mode) )
+    try:
+        yield fh
+    finally:
+        if fh is not sys.stdout and fh is not sys.stdin:
+            fh.close()
 
 class DictFormatWrapper(dict):
     """
