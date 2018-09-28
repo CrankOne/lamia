@@ -21,11 +21,25 @@
 
 import os, logging, logging.config, yaml
 
+gColoredPrfxs = {
+        logging.CRITICAL : "\033[41;1;11m\u2592E\033[0m",
+        logging.ERROR    : "\033[31;1;11m\u2591E\033[0m",
+        logging.WARNING  : "\033[33;1;11m\u2591W\033[0m",
+        logging.INFO     : "\033[34;1;11m\u2591I\033[0m",
+        logging.DEBUG    : "\033[34;2;11m\u2591D\033[0m",
+        logging.NOTSET   : "\033[31;2;11m\u2591?\033[0m"
+    }
+
+class ConsoleColoredFormatter(logging.Formatter):
+    def format( self, record ):
+        return gColoredPrfxs[record.level] \
+                + ' ' + super(ConsoleColoredFormatter, self).format(record)
+
 def setup( defaultPath='logging.yaml'
          , defaultLevel=logging.INFO
          , envKey='LAMIA_LOG_CFG' ):
     """
-    Setup logging configuration
+    Setup logging configuration.
     """
     path = defaultPath
     value = os.getenv(envKey, None)
