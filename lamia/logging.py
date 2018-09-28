@@ -23,7 +23,7 @@ import os, logging, logging.config, yaml
 
 def setup( defaultPath='logging.yaml'
          , defaultLevel=logging.INFO
-         , envKey='LOG_CFG' ):
+         , envKey='LAMIA_LOG_CFG' ):
     """
     Setup logging configuration
     """
