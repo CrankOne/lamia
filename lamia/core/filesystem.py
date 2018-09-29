@@ -200,7 +200,8 @@ class Paths( collections.MutableMapping ):
         m = rxFSStruct.match( templatedName )
         v = None
         if not m:
-            raise BadPathTemplate( '%s at %s'%(templatedName, os.path.join(*path)) )
+            raise BadPathTemplate( '%s at %s'%(
+            templatedName, os.path.join(*path) if path else '<root>') )
         nm = m.group( 'nmTmpl' )
         if len(m.group('isFile')):
             # TODO: validate file description.
@@ -265,13 +266,13 @@ class Paths( collections.MutableMapping ):
     def __iter__(self):
         return iter(self._dStruct)
 
-    def __call__(self, alias, requireComple=True, **kwargs):
+    def __call__(self, alias, requireComplete=True, **kwargs):
         """
         Returns rendered template string w.r.t. to given keyword arguments.
         """
         pt = self._aliases[alias]
         return pt.format_map(DictFormatWrapper( dict(kwargs)
-                                              , requireComplete=requireComple))
+                                              , requireComplete=requireComplete))
 
     def __str__(self):
         """

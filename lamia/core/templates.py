@@ -244,8 +244,11 @@ class Templates(object):
             raise TypeError( "lamia.core.filesystem.Paths object expected"
                     "as TPTH interpolator"
                     ", got %s."%type(fs) )
-        if 'default' not in renderers.keys():
-            L.warning( 'Template renderer "default" is overriden when'
+        if 'default' in renderers.keys():
+            # Puzzling message. Means that hereafter we use foreign template
+            # renderer insted of current instance when it is reffered to
+            # "default".
+            L.warning( 'Template renderer "default" will be overriden when'
                     ' deploying FS structure.' )
         renderers['default'] = self
         fs.create_on( root
