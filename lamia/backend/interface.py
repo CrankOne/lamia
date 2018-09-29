@@ -155,6 +155,26 @@ def argparse_add_common_args(p):
     p.add_argument( '--backend-config', help="Configuration file for the"
             " backend to be used.", required=False )
 
+def backend_specific_subm_args( given, backend ):
+    L = logging.getLogger(__name__)
+    submArgs={}
+    for strPair in given or []:
+        m = rxArg.match(strPair)
+        if not m:
+            raise ValueError('Unable to interpret submission argument' \
+                    ' expression "%s".'%strPair )
+        if 'backend' in m.groupdict().keys() \
+        and backend != m.groupdict()['backend']:
+            L.debug("Parameter `%s:%s=%s' is omitted (using %s)."%(
+                    m.groupdict()['key'],
+                    m.groupdict()['backend'],
+                    m.groupdict()['value'],
+                    args.backend ))
+            continue
+        submArgs[m.groupdict()['key']] = m.groupdict()['value']
+    return submArgs
+
+
 def job_submit_main(cmdArgs):
     """
     Defines argument parser object for possible future usage.
@@ -177,21 +197,7 @@ def job_submit_main(cmdArgs):
     argparse_add_common_args(p)
     args = p.parse_args(cmdArgs)
     L.debug( 'Parsed: %s'%(str(args)) )
-    submArgs={}
-    for strPair in args.argument or []:
-        m = rxArg.match(strPair)
-        if not m:
-            raise ValueError('Unable to interpret submission argument' \
-                    ' expression "%s".'%strPair )
-        if 'backend' in m.groupdict().keys() \
-        and args.backend != m.groupdict()['backend']:
-            L.debug("Parameter `%s:%s=%s' is omitted (using %s)."%(
-                    m.groupdict()['key'],
-                    m.groupdict()['backend'],
-                    m.groupdict()['value'],
-                    args.backend ))
-            continue
-        submArgs[m.groupdict()['key']] = m.groupdict()['value']
+    submArgs = backend_specific_subm_args( args.argument, args.backend )
     B = instantiate_backend(args.backend, args.backend_config)
     try:
         r = B.submit( args.job_name
