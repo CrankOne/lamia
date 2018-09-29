@@ -58,6 +58,7 @@ def dict_product(**kwargs):
         {one:2, two:4}
     Order is arbitrary.
     """
+    L = logging.getLogger(__name__)
     scalars = {}
     sequences = {}
     for k, v in kwargs.items():
@@ -79,11 +80,14 @@ def render_path_templates(*args, requireComplete=True, **kwargs):
     Note, that in case of redundant kwargs, it will produce duplicating paths,
     so user code must get rid of them.
     """
+    L = logging.getLogger(__name__)
+    L.debug('Generating path templates product on: %s; %s.'%(
+        ', '.join(args), str(kwargs) ))
     s = os.path.join(*args)
     keys = filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)] )
     for skwargs in dict_product(**{ k : kwargs[k] for k in keys }):
         yield s.format_map(DictFormatWrapper( dict(skwargs)
-                                                    , requireComplete=requireComplete )) \
+                                            , requireComplete=requireComplete )) \
             , skwargs
 
 def check_dir( path, mode=None ):
@@ -133,7 +137,7 @@ def get_path_meanings( path, basedir=None, recursive=False, rxStr=None ):
 #  https://gist.github.com/howardhamilton/537e13179489d6896dd3
 @contextlib.contextmanager
 def pushd(newDir):
-    L = logging.getLogger('lamia.filesystem')
+    L = logging.getLogger(__name__)
     prevDir = os.getcwd()
     os.chdir(newDir)
     L.debug( 'pushd(%s)'%newDir )
@@ -280,9 +284,9 @@ class Paths( collections.MutableMapping ):
             , indent=1 )
 
     def _generate( self, root, path, fs
-            , pathCtx={}
-            , leafHandler=None
-            , tContext={} ):
+                 , pathCtx={}
+                 , leafHandler=None
+                 , tContext={} ):
         """
         Generates the particular node (file or directory) recursively.
         """
@@ -294,7 +298,9 @@ class Paths( collections.MutableMapping ):
                     , leafHandler=leafHandler, tContext=tContext )
             if not leafHandler:
                 continue
-            for p, pathContext in render_path_templates( *([root] + np), requireComplete=True, **pathCtx ):
+            for p, pathContext in render_path_templates( *([root] + np)
+                                                       , requireComplete=True
+                                                       , **pathCtx ):
                 templatePath = os.path.join(*np)
                 if p not in self._visited:
                     self._visited.add(p)
@@ -351,7 +357,8 @@ class Paths( collections.MutableMapping ):
                     if isinstance( pathCtx, lamia.core.configuration.Stack ):
                         pathCtx.pop( tag='recursive-path-subst' )
 
-    def create_on( self, root, pathCtx={}, tContext={}, leafHandler=None ):
+    def create_on( self, root
+                 , pathCtx={}, tContext={}, leafHandler=None ):
         self._visited = set()
         self._generate( root, [], self
                 , pathCtx=pathCtx
