@@ -176,9 +176,9 @@ def argparse_add_common_args(p):
                     for c in BatchBackend.__subclasses__() ]) \
                     if len(BatchBackend.__subclasses__()) else \
             'None back-ends are available. Consider loading some prior to' \
-            'run this code.'), required=True )
+            'run this code.') )
     p.add_argument( '--backend-config', help="Configuration file for the"
-            " backend to be used.", required=False )
+            " backend to be used." )
 
 def backend_specific_subm_args( given, backend ):
     L = logging.getLogger(__name__)
