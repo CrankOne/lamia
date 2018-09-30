@@ -23,18 +23,25 @@ import shlex, subprocess, re, logging, sys, copy
 import lamia.backend.interface
 
 # A regex to parse the LSF message about job being successfully submitted:
-rxJobSubmitted = re.compile(r'^Job <(?P<jID>\d+)> is submitted to(?: default)? queue <(?P<queue>[^>]+)>\.$')
+rxJSubmitted = re.compile(r'^Job <(?P<jID>\d+)> is submitted to(?: default)? queue <(?P<queue>[^>]+)>\.$')
+# A regex to parse `bsub -wX' output about jobs being currently active or
+# being recently done (`bsub -wXd).
+rxJList = re.compile( r'^(?P<jID>\d+)\s+(?P<user>\w+)\s+'\
+                       '(?P<jState>[A-Z]+)\s+(?P<queue>\w+)\s+'\
+                       '(?P<submHost>[\w\.]+)\s(?P<execHost>[\w.]+)\s+'\
+                       '(?P<jName>[\w.-]+)\s+(?P<jSubTime>.+?)\s*$' )
 # Default backend-specific settings:
 gDefaults = {
         # Where to find executables responsible for various tasks
         'execs' : {
-            'bsub' : 'bsub'
+            'bsub' : 'bsub',
+            'bjobs' : 'bjobs'
         },
         # LSF-specific job submission settings
         'bsub'  : {},
         'bpeek' : {},
         'bkill' : {},
-        'bjobs' : {}
+        'bjobs' : { 'noheader': None, 'wX' : None }
     }
 
 
@@ -47,6 +54,38 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
 
     def __init__( self, config ):
         super().__init__(config)
+
+    def _bjobs(self, cmd_, timeout=timeout, popenKwargs={}):
+        # Submit the job and check its result.
+        try:
+            # Sets the default popen's kwargs and override it by user's kwargs
+            pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
+                                , 'stderr' : subprocess.PIPE
+                                , 'universal_newlines' : True })
+            pkw.update(popenKwargs)
+            bjP = subprocess.Popen( cmd_, **pkw )
+            L.debug('Performing subprocess invocation:')
+            L.debug("  $ %s"%(' '.join(cmd_)) )
+            L.debug("Supplementary popen() arguments: %s."%str(pkw) )
+            out, err = bjP.communicate( timeout=timeout )
+            rc = bjP.returncode
+            #m = rxJSubmitted.match( out.decode('ascii') )  # TODO
+        except Exception as e:
+            raise lamia.backend.interface.JListFailure( exception=e )
+        if not m or 0 != rc:
+            raise lamia.backend.interface.JListFailure(
+                    output={ 'stdout' : out
+                           , 'stderr' : err
+                           , 'rc' : rc })
+        jobsList = []
+        for l in iter(out.readline, ''):
+            m = rxJList.match(l)
+            if not m:
+                L.warning('Unable to interpret bjobs output line: "%s"'%l)
+                continue
+            jobsList.append(m.groupdict())
+        L.debug( 'bjobs output of %d entries treated'%len(jobsList) )
+        return jobsList
 
     def submit( self, jobName
                     , cmd=None
@@ -72,9 +111,9 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
-        cmd_.append( '-J %s'%jobName )
-        cmd_.append( '-oo %s'%stdout )
-        cmd_.append( '-eo %s'%stderr )
+        cmd_.append( '-J%s'%jobName )
+        cmd_.append( '-oo%s'%stdout )
+        cmd_.append( '-eo%s'%stderr )
         #- Append the command:
         stdinCmds = None
         if type(cmd) is None \
@@ -98,7 +137,8 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         try:
             # Sets the default popen's kwargs and override it by user's kwargs
             pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
-                                , 'stderr' : subprocess.PIPE })
+                                , 'stderr' : subprocess.PIPE
+                                , 'universal_newlines' : True })
             pkw.update(popenKwargs)
             submJob = subprocess.Popen( cmd_, **pkw )
             L.debug('Performing subprocess invocation:')
@@ -112,7 +152,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             else:
                 out, err = submJob.communicate( timeout=timeout )
             rc = submJob.returncode
-            m = rxJobSubmitted.match( out.decode('ascii') )
+            m = rxJSubmitted.match( out.decode('ascii') )
         except Exception as e:
             raise lamia.backend.interface.SubmissionFailure( exception=e )
         if not m or 0 != rc:
@@ -122,6 +162,24 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                            , 'rc' : rc })
         L.info( 'LSF job submitted: {queue}/{jID}'.format(**m.groupdict()) )
         return m.groupdict()['jID'], m.groupdict()['queue']
+
+    def list(self, timeout=30, popenKwargs={}):
+        L = logging.getLogger(__name__)
+        # Form the full bjobs tuple:
+        #- Prepare the bsub arguments:
+        cmd_ = [self.cfg['execs.bjobs']]
+        bjobsArgs = {} #copy.deepcopy(self.cfg['bsub'])
+        bjobsArgs.update(submArgs)
+        # Form the LSF bjobs arguments
+        for k, v in bsubArgs.items():
+            cmd_.append( '-%s'%k )
+            if v is not None:
+                cmd_.append(str(v))
+        jLst = self._run_bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        # Repeat, to obtain jobs what are recently done
+        cmd_.append( '-d' )
+        jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        return jLst
 
     def get_status(self, jID, popenKwargs={}):
         """

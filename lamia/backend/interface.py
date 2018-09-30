@@ -24,17 +24,34 @@ import lamia.core.configuration, lamia.logging
 
 rxArg = re.compile(r'^(?P<key>\w+):(?P<backend>\w+)?=(?P<value>.*)$')
 
-class SubmissionFailure(RuntimeError):
+class BackendCommandError(RuntimeError):
+    """
+    An exception class bearing information about error happened during
+    invokation of command sent to the back-end.
+    We consider that error is happened if either the Popen() failed, or the
+    shell command return code is non-zero. In both cases, user code must be
+    notified.
+    """
     def __init__(self, output={'stdout':None, 'stderr':None, 'rc':None}
                      , exception=None):
         self.output = output
         self.exception = exception
-        message = "Job submission error occured."
+        message = "Batch back-end error occured."
         if self.exception:
             message += "An \"%s\" exception occured while subprocessing."%(str(exception))
         else:
             message += "See `output' property(-ies) associated."
         super().__init__(message)
+    # TODO: repr() or str() or?..
+
+
+class SubmissionFailure(BackendCommandError):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+class JListFailure(BackendCommandError):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
 #{
 #    # An arbitrary expression to uniqely identify the current
@@ -119,6 +136,14 @@ class BatchBackend(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
+    def list( self, timeout=30, popenKwargs={} ):
+        """
+        Retrieves a list of currently active (or recently done, if appliable)
+        jobs.
+        """
+        pass
+
 def instantiate_backend( name, config, *args, **kwargs ):
     """
     A virtual constructor for back-end instances: creates particular back-end
@@ -181,7 +206,7 @@ def job_submit_main(cmdArgs):
     """
     L = logging.getLogger(__name__)
     L.debug('job_submit() invoked with: %s'%str(cmdArgs))
-    p = argparse.ArgumentParser( description="A job-submission wrapper for LSF.")
+    p = argparse.ArgumentParser( description="A job-submission wrapper.")
     p.add_argument( '-f', '--result-format', help="Sepcifies the form of" \
             " message being printed back upon successfull job submission." \
             " Must be a python format() string consuming at least the {jID}"\
@@ -204,6 +229,37 @@ def job_submit_main(cmdArgs):
                     , cmd=args.fwd
                     , stdout=args.stdout_log, stderr=args.stderr_log
                     , submArgs=submArgs )
+    except JListFailure as e:
+        sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
+        if not e.exception:
+            L.error( '<submission command stdout>:\n' )
+            L.error( e.output['stdout'].decode('ascii') )
+            L.error( '<submission command stderr>:\n' )
+            L.error( e.output['stderr'].decode('ascii') )
+        else:
+            L.exception( e.exception )
+    #print( args.result_format.format(**r) )
+    return 0
+
+def job_list_main(cmdArgs):
+    """
+    Defines argument parser object for possible future usage.
+    """
+    L = logging.getLogger(__name__)
+    L.debug('job_list() invoked with: %s'%str(cmdArgs))
+    p = argparse.ArgumentParser( description="A job-listing wrapper.")
+    p.add_argument( '-f', '--result-format', help="Sepcifies the form of" \
+            " message being printed back upon successfull retrieval of jobs" \
+            " list. Must be a python format() string consuming at least"
+            " the {jID} and {jState} variable (rest are backend-specific).",
+            default='jID={jID} jState={jState}' )
+    argparse_add_common_args(p)
+    args = p.parse_args(cmdArgs)
+    L.debug( 'Parsed: %s'%(str(args)) )
+    submArgs = backend_specific_subm_args( args.argument, args.backend )
+    B = instantiate_backend(args.backend, args.backend_config)
+    try:
+        r = B.list( submArgs=submArgs )
     except SubmissionFailure as e:
         sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
         if not e.exception:
@@ -225,6 +281,8 @@ def main():
     procedure = sys.argv[1] if len(sys.argv) > 1 else ''
     if 'submit' == procedure:
         return job_submit_main( sys.argv[2:] )
+    elif 'list' == procedure:
+        return job_list_main( sys.argv[2:] )
     elif 'status' == procedure:
         pass
     elif 'kill' == procedure:
