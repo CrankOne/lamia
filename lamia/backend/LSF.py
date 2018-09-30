@@ -72,9 +72,9 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
-        cmd_.append( '-J %s'%jobName )
-        cmd_.append( '-oo %s'%stdout )
-        cmd_.append( '-eo %s'%stderr )
+        cmd_.append( '-J%s'%jobName )
+        cmd_.append( '-o%s'%stdout )
+        cmd_.append( '-e%s'%stderr )
         #- Append the command:
         stdinCmds = None
         if type(cmd) is None \
