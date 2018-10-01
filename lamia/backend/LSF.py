@@ -152,7 +152,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             else:
                 out, err = submJob.communicate( timeout=timeout )
             rc = submJob.returncode
-            m = rxJSubmitted.match( out.decode('ascii') )
+            m = rxJSubmitted.match( out ) #.decode('ascii') )
         except Exception as e:
             raise lamia.backend.interface.SubmissionFailure( exception=e )
         if not m or 0 != rc:

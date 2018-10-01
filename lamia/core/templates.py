@@ -150,6 +150,11 @@ class _RecursiveTemplatesHandler(object):
         L.debug( 'Rendering of %s.'%path )
         rTxt = None
         if type(template) is str:
+            if '@' == template:
+                # A special case for files paths that do not correspond to any
+                # file created by subtree-creating procedure, but rather being
+                # injected into subtree for further usage in user code.
+                return
             rTxt = self.renderers['default'](template, **context)
         elif type(template) is dict:
             if 'id' in template.keys():

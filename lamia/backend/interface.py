@@ -194,7 +194,7 @@ def backend_specific_subm_args( given, backend ):
                     m.groupdict()['key'],
                     m.groupdict()['backend'],
                     m.groupdict()['value'],
-                    args.backend ))
+                    backend ))
             continue
         submArgs[m.groupdict()['key']] = m.groupdict()['value']
     return submArgs
