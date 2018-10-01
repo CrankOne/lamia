@@ -55,7 +55,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
     def __init__( self, config ):
         super().__init__(config)
 
-    def _bjobs(self, cmd_, timeout=timeout, popenKwargs={}):
+    def _bjobs(self, cmd_, timeout=30, popenKwargs={}):
         # Submit the job and check its result.
         try:
             # Sets the default popen's kwargs and override it by user's kwargs
