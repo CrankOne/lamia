@@ -9,6 +9,7 @@ Various auxilliary filesystem routines, coming in hand for lamia procedures.
 
 rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@/\n]+)(?:@(?P<alias>[_\-\w]+))?$'
 rxFSStruct = re.compile(rxsFSStruct)
+rxFmtPat = re.compile(r'\{[^}\s]+\}')
 
 #
 # Exceptions
@@ -177,7 +178,10 @@ class DictFormatWrapper(dict):
         super().__init__(*args, **kwargs)
 
     def __missing__(self, key):
+        L = logging.getLogger(__name__)
+        #if dpath.get(key):
         if self.requireComplete:
+            L.debug('Keys in context: %s'%(', '.join(self.keys())))
             raise IncompleteContext( key )
         else:
             return '{%s}'%key
@@ -366,4 +370,35 @@ class Paths( collections.MutableMapping ):
                 , tContext=tContext
                 , leafHandler=leafHandler )
         self._visited = None
+
+def auto_path( p
+             , fStruct=None
+             , requireComplete=True
+             , **kwargs ):
+    """
+    `p' must be a string identifying the path in a following manner:
+        - if it starts with `@' sign, the rest of the `p' content will be
+        considered as an alias within `fStruct' entry. The rendered string
+        corresponding to some FS subtree alias will be returned then.
+        - if it contains `{}' expression, it will be considered as python-
+        formatting character that is to be rendered using the context supplied
+        by **kwargs.
+    `fStruct' is expected to be an FS subtree description. If it is omitted,
+    no `@' alias could be discovered.
+    """
+    m = rxFmtPat.match(p)
+    if '@' == p[0]:
+        if not fStruct:
+            raise ValueError('Alias given, but no filesystem subtree object'
+                    ' is provided. Can not affiliate the alias.' )
+        return fStruct(p[1:], requireComplete=requireComplete, **kwargs)
+    elif '{' in p:
+        r = p.format(**kwargs)
+        m = rxFmtPat.findall( r )
+        if m and requireComplete:
+            raise RuntimeError("Path template \"%s\" is incomplete within"
+                    " current context: \"%s\""%( p, r ))
+        return r
+    else:
+        return p
 
