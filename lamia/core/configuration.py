@@ -76,7 +76,8 @@ def parse_context_stream( argsFPath ):
     else:
         pass  # do nothing, leave cfg being `None'
     if cfg is None:
-        raise RuntimeError( 'Unrecognized format for context input "%s".'%argsFPath )
+        raise RuntimeError( 'Unrecognized context input format.'
+            ' File path: "%s".'%argsFPath )
     return cfg
 
 class ConfigInterpolator(object):
