@@ -135,9 +135,7 @@ class Configuration(collections.MutableMapping):
                 pst = urlparse(initObject)
                 if '' == pst.scheme \
                 or 'file' == pst.scheme:
-                    # TODO: support not only the YAML
                     cfg = parse_context_stream( pst.path )
-                # ... elif (more schemes to be supported: http/ftp/etc)
                 else:
                     raise NotImplementedError( "URI Scheme \"%s\" is not yet supported."%pst.scheme )
             else:
@@ -150,6 +148,9 @@ class Configuration(collections.MutableMapping):
             initObject = {}
         elif isinstance(initObject, Configuration):
             cfg = copy.deepcopy(initObject._store)
+        else:
+            raise TypeError("Unexpected type for Configuration object"
+                    " initialization: %s."%type(initObject))
         for k, v in switches.items():
             try:
                 cfg[v[1]] = copy.deepcopy(cfg[k][v[0]])
@@ -214,8 +215,36 @@ class Stack(collections.MutableMapping):
     Caveat: to override the entry which is present in the former configuration
     in terms of deletion, use the special Stack.Deleted object.
     """
-    def __init__( self ):
+    # static method:
+    def _obj_to_cfg(self, obj):
+        if type(obj) is not Configuration:
+            return Configuration(obj)
+        else:
+            return obj
+        return obj
+
+    def __init__( self, initObj=[] ):
+        """
+        Constructs configuration stack. The initializing object may be given
+        either as starting Configuration initializer object (or instance) or
+        as a list of objects, in which case each of them will be considered
+        as an instance of configuration or its initializer object.
+        It is also possible to assemble a tagget stack by passing the pairs
+        (two-element tuples) within the list in form (<cfg-init-obj>, <tag>).
+        """
         self._stack = []
+        if type(initObj) is list:
+            for c in initObj:
+                if type(c) is tuple:
+                    c, tag = c
+                    self.push(self._obj_to_cfg(c), tag=tag)
+                else:
+                    self.push(self._obj_to_cfg(c))
+        elif initObj:
+            self.push(self._obj_to_cfg(c))
+        else:
+            raise TypeError('Unexpected type given for configuration stack'
+                    ' initialization: %s.'%type(initObj) )
 
     class _Deleted(object):
         """
@@ -306,7 +335,7 @@ class Stack(collections.MutableMapping):
 
     def argparse_override(self, overrideExpr):
         """
-        Utilizes expressions validated by ConfigArgType.
+        Utilizes expressions validated by conf_arg_expr().
         """
         L = logging.getLogger(__name__)
         expr = {}
@@ -330,4 +359,17 @@ class Stack(collections.MutableMapping):
             # TODO ...
             raise NotImplementedError('TODO: support for "%s"'
                     ' conf-overriding action.')
+
+def compose_stack( ctx=[], defs=[] ):
+    """
+    A common pattern of applying the configuration stack is to specify the list
+    of config files and user overriding definitions within the command line.
+    This function helps to apply them.
+    """
+    if not ctx: ctx = []
+    if not defs: defs = []
+    stk = Stack( ctx )
+    for d in defs:
+        stk.argparse_override(d)
+    return stk
 

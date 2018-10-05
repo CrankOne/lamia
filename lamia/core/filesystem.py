@@ -82,8 +82,9 @@ def render_path_templates(*args, requireComplete=True, **kwargs):
     so user code must get rid of them.
     """
     L = logging.getLogger(__name__)
-    L.debug('Generating path templates product on: %s; %s.'%(
-        ', '.join(args), str(kwargs) ))
+    L.debug('Generating path templates product on sets: {%s}; {%s}.'%(
+          ', '.join([ '"%s"'%s for s in args])
+        , ', '.join([ '"%s"'%s for s in str(kwargs)]) ))
     s = os.path.join(*args)
     keys = filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)] )
     for skwargs in dict_product(**{ k : kwargs[k] for k in keys }):
@@ -363,7 +364,18 @@ class Paths( collections.MutableMapping ):
                         pathCtx.pop( tag='recursive-path-subst' )
 
     def create_on( self, root
-                 , pathCtx={}, tContext={}, leafHandler=None ):
+                 , pathCtx={}
+                 , tContext={}
+                 , leafHandler=None ):
+        """
+        Entry point for in-dir subtree creation.
+            @root is a base dir where the subtree must start
+            @tContext is a file template context
+            @pathCtx is a secial path-rendering context
+            @leafHandler is file-template rendering object
+        Internally, delegates execution to private _generate() method starting
+        a recursive process of template rendering.
+        """
         self._visited = set()
         self._generate( root, [], self
                 , pathCtx=pathCtx
