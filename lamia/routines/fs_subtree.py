@@ -2,25 +2,15 @@
 """
 Filesystem tree creating routine.
 """
+#                               *** *** ***
 import os, sys, logging, argparse, yaml
 import lamia.logging, lamia.core.templates, lamia.core.task
 import lamia.routines.render
 #                               *** *** ***
-class Deployment(lamia.core.task.Task):
-    """
-    A Lamia's task subclass performing deployment of some filesystem subtree.
-    An effective subtree structure and templates have to be supplied by user
-    presets.
-    """
-    def __init__( self, *args, **kwargs ):
-        super().__init__( *args, **kwargs )
-
-    def run(self):
-        super().run()
-#                               *** *** ***
 gCommonParameters = {
     'fstruct,f' : {
-        'help' : "File structure template to render."
+        'help' : "File structure template to render.",
+        'required' : True
     },
     'path_context' : {
         'help' : "Path context stack description. May be a file to be added"
@@ -49,20 +39,17 @@ gCommonParameters = {
     #        , 'action' : 'store_true'
     # }
 }
-
 gExecParameters = {
     'output_dir,o' : {
         'help' : "Base directory where subtree must be created."
     }
 }
-
 gDefaults = {
     'path_contexts' : [],
     'output_dir' : os.getcwd(),
     'path_definitions' : [],
     'fstruct_conf' : 'default'
 }
-
 gEpilog="""
 To make use of this procedure one need a special definition
 of filesystem subtree to be deployed.
@@ -70,60 +57,70 @@ Note, that `--path-def'" entries will not take effect unless --path-ctx=@user is
 specified.
 """
 #                               *** *** ***
-def deploy_fstruct( outputDir=None
-                  , fstruct=None
-                  , fstructConf='default'
-                  , contexts=[], definitions=[]
-                  , pathContexts=[], pathDefinitions=[]
-                  , templatesDirs=[]
-                  , showDiff=False ):
+class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
+                       , metaclass=lamia.core.task.TaskClass ):
     """
-    Single function performing rendering of the subtree. Arguments:
-    @outputDir -- defines the base (target) directory where subtree has to
-        be created.
-    @fstruct -- the subtree description (path to YAML doc or ready object).
-    @fstructConf -- defines the particular section within the @fstruct
-        document
-    @contexts -- additional contexts for templates rendering
-    @definitions -- additional variable definitions for templates rendering
-    @pathContexts -- additional contexts for path templates
-    @pathDefinitions -- aditional definitions for path context
-    @templatesDirs -- templates directory to consider
-    Returns:
-        - instance of lamia.core.templates.Templates used to render templates
-          and actually deploy the subtree;
-        - instance of lamia.core.filesystem.Paths describing files subtree;
-        - runtime contexts stack
-        - path contexts stack
-        - interpolators
-        - filters
-    Note: probably, pointless. We usually need to perform some operations in
-    between of path template-rendering and generating the actual subtree.
+    A Lamia's task subclass performing deployment of some filesystem subtree.
+    An effective subtree structure and templates have to be supplied by user
+    presets.
     """
-    assert(outputDir)
-    assert(fstruct)
-    #
-    if type(fstruct) is str:
-        with open(fstruct) as f:
-            fstruct = lamia.core.filesystem.Paths( yaml.load(f)[fstructConf] )
-    rStk = lamia.core.configuration.compose_stack(contexts, definitions)
-    tli = lamia.core.interpolation.Processor()
-    tli['PATH'] = os.path.realpath
-    fltrs = { 'abspath'    : lamia.core.templates.AbsPathFilter(os.getcwd())
-            , 'commonpath' : lamia.core.templates.CommonPathFilter(os.getcwd()) }
-    pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
-    t = lamia.core.templates.Templates( templatesDirs
-                                      , loaderInterpolators=tli
-                                      , additionalFilters=fltrs
-                                      , extensions=['jinja2.ext.do'] )
-    t.deploy_fs_struct( outputDir, fstruct, pStk
-                      , templateContext=rStk )
-    return t, fstruct, rStk, pStk, ints, fltrs
+    __commonParameters=gCommonParameters
+    __execParameters=gExecParameters
+    __defaults=gDefaults
+
+    def setup_path_templating( self
+                             , pathContexts
+                             , pathDefinitions ):
+        self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
+
+    def setup_fstruct(self, fstruct, fstructConf):
+        if type(fstruct) is str:
+            with open(fstruct) as f:
+                self.fstruct = lamia.core.filesystem.Paths( yaml.load(f)[fstructConf] )
+
+    def _main( self
+             , outputDir=None
+             , fstruct=None
+             , fstructConf='default'
+             , contexts=[], definitions=[]
+             , pathContexts=[], pathDefinitions=[]
+             , templatesDirs=[]
+             , showDiff=False ):
+        """
+        Single function performing rendering of the subtree. Arguments:
+        @outputDir -- defines the base (target) directory where subtree has to
+            be created.
+        @fstruct -- the subtree description (path to YAML doc or ready object).
+        @fstructConf -- defines the particular section within the @fstruct
+            document
+        @contexts -- additional contexts for templates rendering
+        @definitions -- additional variable definitions for templates rendering
+        @pathContexts -- additional contexts for path templates
+        @pathDefinitions -- aditional definitions for path context
+        @templatesDirs -- templates directory to consider
+        Returns:
+            - instance of lamia.core.templates.Templates used to render templates
+              and actually deploy the subtree;
+            - instance of lamia.core.filesystem.Paths describing files subtree;
+            - runtime contexts stack
+            - path contexts stack
+            - interpolators
+            - filters
+        Note: probably, pointless. We usually need to perform some operations in
+        between of path template-rendering and generating the actual subtree.
+        """
+        assert(outputDir)
+        assert(fstruct)
+        self.setup_fstruct( fstruct, fstructConf )
+        self.setup_rendering( templatesDirs, contexts, definitions )
+        self.setup_path_templating( pathContexts, pathDefinitions )
+        self.t.deploy_fs_struct( outputDir
+                          , self.fstruct
+                          , self.pStk
+                          , templateContext=self.rStk )
 #                               *** *** ***
 if "__main__" == __name__:
-    t = lamia.task.Task( globals()
-                       , name=sys.modules[__name__]
-                       , entryPoint=deploy_fstruct
-                       , dependencies=[na58.routines.render] )
+    lamia.logging.setup()
+    t = DeploySubtreeTask()
     sys.exit(t.run())
 

@@ -241,7 +241,7 @@ class Stack(collections.MutableMapping):
                 else:
                     self.push(self._obj_to_cfg(c))
         elif initObj:
-            self.push(self._obj_to_cfg(c))
+            self.push(self._obj_to_cfg(initObj))
         else:
             raise TypeError('Unexpected type given for configuration stack'
                     ' initialization: %s.'%type(initObj) )

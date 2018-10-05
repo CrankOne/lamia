@@ -153,8 +153,12 @@ class TaskClass(type):
             raise AssertionError( "Class `%s' is not derived from `%s'."%(
                 cls.__name__, Task.__name__) )
         # Inject getters
-        for pN in ['common_parameters', 'exec_parameters', 'defaults']:
+        for pN in ['common_parameters']:
             attributedict['get_%s'%pN] = cumulative_class_property_getter( pN )
+        attributedict['get_exec_parameters'] = classmethod( lambda cls :
+                getattr(cls, '_%s__execParameters'%cls.__name__) )
+        attributedict['get_defaults'] = classmethod( lambda cls :
+                getattr(cls, '_%s__defaults'%cls.__name__) )
         # Produce class object
         return super().__new__(cls, clsname, superclasses, attributedict)
 
