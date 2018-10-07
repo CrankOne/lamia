@@ -135,7 +135,7 @@ class BatchBackend(abc.ABC):
                     , intervalSecs=60
                     , backendArguments={}
                     , popenKwargs={}
-                    , report=False):
+                    , report=True ):
         """
         Will await for job of given `jID' to finish, periodically retrieving
         it's status.

@@ -26,10 +26,7 @@ import lamia.backend.interface
 rxJSubmitted = re.compile(r'^Job <(?P<jID>\d+)> is submitted to(?: default)? queue <(?P<queue>[^>]+)>\.$')
 # A regex to parse `bsub -wX' output about jobs being currently active or
 # being recently done (`bsub -wXd).
-rxJList = re.compile( r'^(?P<jID>\d+)\s+(?P<user>\w+)\s+'\
-                       '(?P<jState>[A-Z]+)\s+(?P<queue>\w+)\s+'\
-                       '(?P<submHost>[\w\.]+)\s(?P<execHost>[\w.]+)\s+'\
-                       '(?P<jName>[\w.-]+)\s+(?P<jSubTime>.+?)\s*$' )
+rxJList = re.compile( r'^(?P<jID>\d+)\s+(?P<user>\w+)\s+(?P<jState>[A-Z]+)\s+(?P<queue>\w+)\s+(?P<submHost>[\w\.]+)\s+(?P<execHost>[\w.\-]+)\s+(?P<jName>[\w.\-]+)\s+(?P<jSubTime>.+?)\s*$' )
 # All these entities has a bitflags of following meaning:
 #   0x1 denotes the general error
 #   0x2 means that we can wait for the job to finish
@@ -70,6 +67,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         super().__init__(config)
 
     def _bjobs(self, cmd_, timeout=30, popenKwargs={}):
+        L = logging.getLogger(__name__)
         # Submit the job and check its result.
         try:
             # Sets the default popen's kwargs and override it by user's kwargs
@@ -86,13 +84,14 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             #m = rxJSubmitted.match( out.decode('ascii') )  # TODO
         except Exception as e:
             raise lamia.backend.interface.JListFailure( exception=e )
-        if not m or 0 != rc:
+        if 0 != rc:
             raise lamia.backend.interface.JListFailure(
                     output={ 'stdout' : out
                            , 'stderr' : err
                            , 'rc' : rc })
         jobsList = []
-        for l in iter(out.readline, ''):
+        for l in out.split('\n'):
+            if not l: continue  # omit blank lines
             m = rxJList.match(l)
             if not m:
                 L.warning('Unable to interpret bjobs output line: "%s"'%l)
@@ -177,7 +176,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         L.info( 'LSF job submitted: {queue}/{jID}'.format(**m.groupdict()) )
         return int(m.groupdict()['jID']), dict(m.groupdict())
 
-    def list_jobs(self, timeout=30, backendArguments=[], popenKwargs={}):
+    def list_jobs(self, timeout=30, backendArguments={}, popenKwargs={}):
         L = logging.getLogger(__name__)
         # Form the full bjobs tuple:
         #- Prepare the bsub arguments:
@@ -185,7 +184,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         bjobsArgs = copy.deepcopy(self.cfg['bjobs'])
         bjobsArgs.update(backendArguments)
         # Form the LSF bjobs arguments
-        for k, v in backendArguments.items():
+        for k, v in bjobsArgs.items():
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
@@ -195,7 +194,10 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
         return jLst
 
-    def get_status(self, jID, backendArguments={}, popenKwargs={}):
+    def get_status( self, jID
+                  , backendArguments={}
+                  , timeout=30
+                  , popenKwargs={}):
         """
         By given `jID' (of possibly arbitrary type), shall return "active job
         properties object".
@@ -207,15 +209,15 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         bjobsArgs = copy.deepcopy(self.cfg['bjobs'])
         bjobsArgs.update(backendArguments)
         # Form the LSF bjobs arguments
-        for k, v in backendArguments.items():
+        for k, v in bjobsArgs.items():
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
         cmd_.append( '%d'%jID )
         jLst = self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
         # Repeat, to obtain jobs what are recently done
-        cmd_.append( '-d' )
-        jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        #cmd_.append( '-d' )
+        #jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
         return jLst
 
     def kill_job(self, jID, popenKwargs={}):
@@ -229,7 +231,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                     , nAttempts=0
                     , intervalSecs=60
                     , popenKwargs={}
-                    , report=False ):
+                    , report=True ):
         """
         TODO: support for job arrays. See, e.g.:
             https://www.ibm.com/support/knowledgecenter/en/SSETD4_9.1.3/lsf_admin/job_arrays_lsf.html
@@ -237,24 +239,30 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         """
         L = logging.getLogger(__name__)
         nAttempt = 0
+        # Kludge: here we waiting 5 secs due to LSF feature of not showing the
+        # job in bjobs list immediately after submission.
+        time.sleep(5) # TODO: is it true?
         while True:
             nAttempt += 1
             jLst = self.get_status( jID, popenKwargs=popenKwargs )
-            if len(jLst) == 0 or nAttempt >= nAttempts:
-                break  # Exit due to end or number of attempts exceeded
+            if len(jLst) == 0 or (nAttempts != 0 and nAttempt >= nAttempts):
+                L.warning("Exit waiting loop due to end or number"
+                    " of attempts exceeded or none job with such ID"
+                    " found.")
+                break
             assert( 1 == len(jLst))
-            jState = jLst[1]['jState']
+            jState = jLst[0]['jState']
             jStCode = gLSFJobStates.get(jState, 0x2)
-            if 0x1 & jStCode:
+            if 0x2 & jStCode:
                 if report:
                     L.info( 'Job %d has "%s" status, waiting%s.'%(jID, jState,
                         ' %d/%d'%(nAttempt, nAttempts) if nAttempts else '' ) )
                 time.sleep(intervalSecs)
             else:
+                L.info( 'Done waiting for LSF job %d, state: "%s"'%(jID, jState) )
                 break  # Exit due to `done' probably
-            if 0x2 & jStCode:
+            if 0x1 & jStCode:
                 L.error("LSF job %d has erroneous/unknown status: \"%s\"."%jState )
-        L.info( 'Done waiting for LSF job %d.'%jID )
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass
