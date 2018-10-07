@@ -19,7 +19,7 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import shlex, subprocess, re, logging, sys, copy
+import shlex, subprocess, re, logging, sys, copy, time
 import lamia.backend.interface
 
 # A regex to parse the LSF message about job being successfully submitted:
@@ -30,6 +30,19 @@ rxJList = re.compile( r'^(?P<jID>\d+)\s+(?P<user>\w+)\s+'\
                        '(?P<jState>[A-Z]+)\s+(?P<queue>\w+)\s+'\
                        '(?P<submHost>[\w\.]+)\s(?P<execHost>[\w.]+)\s+'\
                        '(?P<jName>[\w.-]+)\s+(?P<jSubTime>.+?)\s*$' )
+# All these entities has a bitflags of following meaning:
+#   0x1 denotes the general error
+#   0x2 means that we can wait for the job to finish
+gLSFJobStates = {
+        'PEND' : 0x2,
+        'RUN' : 0x2,
+        'DONE' : 0x0,
+        'WAIT' : 0x2,
+        'PSUSP' : 0x2,
+        'USUSP' : 0x2,
+        'SSUSP' : 0x2,
+        'UNKWN' : 0x1
+    }
 # Default backend-specific settings:
 gDefaults = {
         # Where to find executables responsible for various tasks
@@ -41,7 +54,8 @@ gDefaults = {
         'bsub'  : {},
         'bpeek' : {},
         'bkill' : {},
-        'bjobs' : { 'noheader': None, 'wX' : None }
+        'bjobs' : { 'noheader': None
+                  , 'wX' : None }
     }
 
 
@@ -104,7 +118,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         # Form the full bsub tuple:
         #- Prepare the bsub arguments:
         cmd_ = [self.cfg['execs.bsub']]
-        bsubArgs = {} #copy.deepcopy(self.cfg['bsub'])
+        bsubArgs = copy.deepcopy(self.cfg['bsub'])
         bsubArgs.update(backendArguments)
         # Form the LSF submission arguments
         for k, v in bsubArgs.items():
@@ -161,32 +175,48 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                            , 'stderr' : err
                            , 'rc' : rc })
         L.info( 'LSF job submitted: {queue}/{jID}'.format(**m.groupdict()) )
-        return m.groupdict()['jID'], m.groupdict()['queue']
+        return int(m.groupdict()['jID']), dict(m.groupdict())
 
     def list_jobs(self, timeout=30, backendArguments=[], popenKwargs={}):
         L = logging.getLogger(__name__)
         # Form the full bjobs tuple:
         #- Prepare the bsub arguments:
         cmd_ = [self.cfg['execs.bjobs']]
-        bjobsArgs = {} #copy.deepcopy(self.cfg['bsub'])
+        bjobsArgs = copy.deepcopy(self.cfg['bjobs'])
         bjobsArgs.update(backendArguments)
         # Form the LSF bjobs arguments
         for k, v in backendArguments.items():
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
-        jLst = self._run_bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        jLst = self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
         # Repeat, to obtain jobs what are recently done
         cmd_.append( '-d' )
         jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
         return jLst
 
-    def get_status(self, jID, popenKwargs={}):
+    def get_status(self, jID, backendArguments={}, popenKwargs={}):
         """
         By given `jID' (of possibly arbitrary type), shall return "active job
-        properties object"
+        properties object".
         """
-        pass
+        L = logging.getLogger(__name__)
+        # Form the full bjobs tuple:
+        #- Prepare the bsub arguments:
+        cmd_ = [self.cfg['execs.bjobs']]
+        bjobsArgs = copy.deepcopy(self.cfg['bjobs'])
+        bjobsArgs.update(backendArguments)
+        # Form the LSF bjobs arguments
+        for k, v in backendArguments.items():
+            cmd_.append( '-%s'%k )
+            if v is not None:
+                cmd_.append(str(v))
+        cmd_.append( '%d'%jID )
+        jLst = self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        # Repeat, to obtain jobs what are recently done
+        cmd_.append( '-d' )
+        jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        return jLst
 
     def kill_job(self, jID, popenKwargs={}):
         """
@@ -195,8 +225,36 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         """
         pass
 
-    def wait_for_job(self, jID, popenKwargs={}):
-        pass
+    def wait_for_job( self, jID
+                    , nAttempts=0
+                    , intervalSecs=60
+                    , popenKwargs={}
+                    , report=False ):
+        """
+        TODO: support for job arrays. See, e.g.:
+            https://www.ibm.com/support/knowledgecenter/en/SSETD4_9.1.3/lsf_admin/job_arrays_lsf.html
+            https://www.ibm.com/support/knowledgecenter/SSETD4_9.1.3/lsf_admin/job_array_create.html
+        """
+        L = logging.getLogger(__name__)
+        nAttempt = 0
+        while True:
+            nAttempt += 1
+            jLst = self.get_status( jID, popenKwargs=popenKwargs )
+            if len(jLst) == 0 or nAttempt >= nAttempts:
+                break  # Exit due to end or number of attempts exceeded
+            assert( 1 == len(jLst))
+            jState = jLst[1]['jState']
+            jStCode = gLSFJobStates.get(jState, 0x2)
+            if 0x1 & jStCode:
+                if report:
+                    L.info( 'Job %d has "%s" status, waiting%s.'%(jID, jState,
+                        ' %d/%d'%(nAttempt, nAttempts) if nAttempts else '' ) )
+                time.sleep(intervalSecs)
+            else:
+                break  # Exit due to `done' probably
+            if 0x2 & jStCode:
+                L.error("LSF job %d has erroneous/unknown status: \"%s\"."%jState )
+        L.info( 'Done waiting for LSF job %d.'%jID )
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass
