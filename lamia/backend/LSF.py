@@ -142,7 +142,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             pkw.update(popenKwargs)
             submJob = subprocess.Popen( cmd_, **pkw )
             L.debug('Performing subprocess invocation:')
-            L.debug("  $ %s"%(' '.join(cmd_) if stdinCmds is not None else '<stdin>' ))
+            L.debug("  $ %s"%(' '.join(cmd_) if stdinCmds is None else '<stdin>' ))
             L.debug("Supplementary popen() arguments: %s."%str(pkw) )
             if stdinCmds is not None:
                 L.debug( "--- begin of forwarded input from stdin ---" )
