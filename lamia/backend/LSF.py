@@ -91,7 +91,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                     , cmd=None
                     , stdout=None, stderr=None
                     , timeout=30
-                    , submArgs={}
+                    , backendArguments={}
                     , popenKwargs={} ):
         """
         Will forward `cmd' as a string or a tuple within the `subprocess.Popen'
@@ -105,7 +105,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         #- Prepare the bsub arguments:
         cmd_ = [self.cfg['execs.bsub']]
         bsubArgs = {} #copy.deepcopy(self.cfg['bsub'])
-        bsubArgs.update(submArgs)
+        bsubArgs.update(backendArguments)
         # Form the LSF submission arguments
         for k, v in bsubArgs.items():
             cmd_.append( '-%s'%k )
@@ -169,7 +169,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         #- Prepare the bsub arguments:
         cmd_ = [self.cfg['execs.bjobs']]
         bjobsArgs = {} #copy.deepcopy(self.cfg['bsub'])
-        bjobsArgs.update(submArgs)
+        bjobsArgs.update(backendArguments)
         # Form the LSF bjobs arguments
         for k, v in backendArguments.items():
             cmd_.append( '-%s'%k )

@@ -86,7 +86,7 @@ class BatchBackend(abc.ABC):
                    , cmd=None
                    , stdout=None, stderr=None
                    , timeout=30
-                   , submArgs={}
+                   , backendArguments={}
                    , popenKwargs={} ):
         """
         Shall submit job and, upon successful submission, return the "job
@@ -94,7 +94,7 @@ class BatchBackend(abc.ABC):
         The `cmd' must be either a list of shell command arguments to submit,
         or the entire command, or None/'-' indicating that input from stdin
         has to be retrieved.
-        The submArgs is an optional parameters usually provided to
+        The `backendArguments' is an optional parameters usually provided to
         submission command, steering the submission process itself. Here, they
         overrides what is given to ctr.
         The `popenKwargs' is rarely used dictionary of arguments forwarded to
