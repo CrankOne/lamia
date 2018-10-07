@@ -163,7 +163,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         L.info( 'LSF job submitted: {queue}/{jID}'.format(**m.groupdict()) )
         return m.groupdict()['jID'], m.groupdict()['queue']
 
-    def list(self, timeout=30, popenKwargs={}):
+    def list_jobs(self, timeout=30, backendArguments=[], popenKwargs={}):
         L = logging.getLogger(__name__)
         # Form the full bjobs tuple:
         #- Prepare the bsub arguments:
@@ -171,7 +171,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         bjobsArgs = {} #copy.deepcopy(self.cfg['bsub'])
         bjobsArgs.update(submArgs)
         # Form the LSF bjobs arguments
-        for k, v in bsubArgs.items():
+        for k, v in backendArguments.items():
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))

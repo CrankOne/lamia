@@ -1,4 +1,23 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2018 Renat R. Dusaev <crank@qcrypt.org>
+# Author: Renat R. Dusaev <crank@qcrypt.org>
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 Lamia helper class for reentrant tasks definition.
 A task class describes the working process in terms of high-level reentrant
@@ -16,7 +35,7 @@ functionality might be found in the `lamia.routines' module. The former are
 usually relevant to some implications for the staging, therefore involving
 evaluation of corresponding routine.
 """
-import argparse, logging, types
+import sys, argparse, logging, types
 import inflection
 import lamia.logging
 
@@ -44,10 +63,6 @@ def _argparse_par(s):
         shortcut = s
     else:
         name = s
-    if shortcut:
-        shortcut = '-' + shortcut
-    if name:
-        name = '--' + inflection.dasherize(name)
     return shortcut, name
 
 class Task(object):
@@ -64,14 +79,24 @@ class Task(object):
         2. The set of default arguments may vary between tasks.
     At this level of abstraction we only make assumptions above, no
     implications about actual `run()' method is made.
+    Note: one may provide the `__epilog' class variable to define the
+    argparse's "epilog" message (printed at the end after the usage info in
+    help/usage reference).
     """
     def add_parameters(self, ps):
         L = logging.getLogger()
+        self._argNames = set()
         for pName, pDescr in ps.items():
             if '@' != pName[0]:
-                arg = list(filter(lambda x: x, _argparse_par(pName)))
-                self.argParser.add_argument( *arg, **pDescr )
-                L.debug( '"%s" named command-line arg added'%(', '.join(arg)) )
+                shortcut, name = _argparse_par(pName) #list(filter(lambda x: x, _argparse_par(pName)))
+                self._argNames.add( name if name else shortcut )
+                assert( name or shortcut )
+                if shortcut: shortcut = '-' + inflection.dasherize(shortcut)
+                if name: name = '--' + inflection.dasherize(name)
+                nms = list(filter(lambda x: x, [shortcut, name]))
+                self.argParser.add_argument( *nms
+                                           , **pDescr )
+                L.debug( '"%s" named command-line arg added'%(', '.join(nms)) )
             else:
                 self.argParser.add_argument( pName[1:], **pDescr )
                 L.debug('Added a positional argument.')
@@ -82,7 +107,10 @@ class Task(object):
         """
         lamia.logging.setup()
         L = logging.getLogger()
-        self._p = argparse.ArgumentParser() # TODO: description=self.__doc__, epilog=self.__epilog )
+        self._p = argparse.ArgumentParser( self.__class__.__doc__,
+                epilog=getattr( self.__class__
+                              , '_%s__epilog'%self.__class__.__name__
+                              , None ) )
         for pN in ['common_parameters', 'exec_parameters']:
             ps = getattr(self, 'get_%s'%pN)()
             L.debug( 'Task base class: got list of length %d for "%s".'%(
@@ -92,19 +120,22 @@ class Task(object):
             self.add_parameters( ps )
         #self.add_parameters( lamia.core.configuration.Stack(self.get_common_parameters()) )
         #self.add_parameters( lamia.core.configuration.Stack(self.get_exec_parameters()) )
-        self._p.set_defaults( **lamia.core.configuration.Stack(self.get_defaults()) )
+        dfts = lamia.core.configuration.Stack(self.get_defaults())
+        self._p.set_defaults( **dfts )
+        L.debug( 'Default values set for %s.'%(', '.join(
+            ['"%s"="%s"'%(k, str(v)) for k, v in dfts.items()])) )
 
     @property
     def argParser(self):
         return self._p
 
-    def run(self):
+    def run(self, args=sys.argv[1:]):
         L = logging.getLogger()
         if not (hasattr(self, '_main') and self._main):
             L.error( 'Entry point is not defined by task instance.' )
             return 1
         argsDct = { inflection.camelize(k, uppercase_first_letter=False) : v \
-                for k, v in vars(self.argParser.parse_args()).items() }
+                for k, v in vars(self.argParser.parse_args(args)).items() }
         # TODO: check compatibility?
         L.debug('Run args: %s'%argsDct)
         return self._main(**argsDct)
@@ -134,15 +165,20 @@ def cumulative_class_property_getter(prop):
 
 class TaskClass(type):
     """
-    A metaclass assembling class from few sources.
+    A metaclass assembling class from few sources. Expects the following
+    class properties to be defined:
+        `__commonParameters' -- a dictionary describing parameters, common for
+    any subclass inheriting this task class
+        `__execParameters' -- a dictionary describing parameters necessary only
+    for the standalone run of this task.
+        `__defaults' -- a dictionary of default values for argument.
+        `__cumulativeDefaults' -- whether or not to consider `__defaults' as
+    a cumulative dict, i.e. to propagate ones from base classes to child. Note,
+    that if direct base classes have their own bases, it won't be automatically
+    propagated unles this property is not set for them as well.
     """
     def __new__(cls, clsname, superclasses, attributedict):
         L = logging.getLogger(__name__)
-        L.debug("New task class derived: `%s'; superclasses: %s; dict: {%s}."%(
-            clsname,
-            ', '.join(list(map(lambda x: x.__name__, superclasses))),
-            ', '.join(['"%s"'%k for k in attributedict.keys()]) )
-            )
         # Check that new class is derived from 
         hasTaskBase = False
         for supCls in superclasses:
@@ -153,13 +189,24 @@ class TaskClass(type):
             raise AssertionError( "Class `%s' is not derived from `%s'."%(
                 cls.__name__, Task.__name__) )
         # Inject getters
-        for pN in ['common_parameters']:
+        cumulativeGetters = ['common_parameters']
+        if attributedict.pop('_%s__cumulativeDefaults'%cls.__name__, False):
+            attributedict['get_defaults'] = classmethod( lambda cls :
+                    getattr(cls, '_%s__defaults'%cls.__name__) )
+        else:
+            cumulativeGetters.append('defaults')
+            L.debug('Default values are set to be cumulative for class "%s".'%(
+                clsname))
+        for pN in cumulativeGetters:
             attributedict['get_%s'%pN] = cumulative_class_property_getter( pN )
         attributedict['get_exec_parameters'] = classmethod( lambda cls :
                 getattr(cls, '_%s__execParameters'%cls.__name__) )
-        attributedict['get_defaults'] = classmethod( lambda cls :
-                getattr(cls, '_%s__defaults'%cls.__name__) )
         # Produce class object
+        L.debug("New task class derived: `%s'; superclasses: %s; dict: {%s}."%(
+            clsname,
+            ', '.join(list(map(lambda x: x.__name__, superclasses))),
+            ', '.join(['"%s"'%k for k in attributedict.keys()]) )
+            )
         return super().__new__(cls, clsname, superclasses, attributedict)
 
 def module_task( className

@@ -21,6 +21,7 @@
 
 import os, logging, logging.config, yaml
 
+gIsSetUp = False
 gColoredPrfxs = {
         logging.CRITICAL : "\033[41;1;11m\u2592E\033[0m",
         logging.ERROR    : "\033[31;1;11m\u2591e\033[0m",
@@ -44,6 +45,9 @@ def setup( defaultPath='logging.yaml'
     Note, that for `root' logger the level will be set to DEBUG once the global
     shell variable is set.
     """
+    global gIsSetUp
+    if gIsSetUp:
+        return
     path = defaultPath
     value = os.getenv(envKey, None)
     if value:
@@ -56,4 +60,5 @@ def setup( defaultPath='logging.yaml'
         logging.config.dictConfig(config)
     else:
         logging.basicConfig(level=defaultLevel)
+    gIsSetUp = True
 

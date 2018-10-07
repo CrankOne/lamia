@@ -1,16 +1,37 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2018 Renat R. Dusaev <crank@qcrypt.org>
+# Author: Renat R. Dusaev <crank@qcrypt.org>
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 Filesystem tree creating routine.
 """
 #                               *** *** ***
 import os, sys, logging, argparse, yaml
-import lamia.logging, lamia.core.templates, lamia.core.task
+import lamia.logging \
+     , lamia.core.templates \
+     , lamia.core.filesystem \
+     , lamia.core.task
 import lamia.routines.render
 #                               *** *** ***
 gCommonParameters = {
     'fstruct,f' : {
         'help' : "File structure template to render.",
-        'required' : True
     },
     'path_context' : {
         'help' : "Path context stack description. May be a file to be added"
@@ -67,6 +88,7 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
     __commonParameters=gCommonParameters
     __execParameters=gExecParameters
     __defaults=gDefaults
+    __epilog=gEpilog
 
     def setup_path_templating( self
                              , pathContexts
@@ -74,9 +96,37 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
 
     def setup_fstruct(self, fstruct, fstructConf):
+        L = logging.getLogger(__name__)
         if type(fstruct) is str:
+            m = lamia.core.filesystem.rxFmtPat.match(fstruct)
+            if m:
+                if hasattr( self, 'pStk' ):
+                    fstruct = fstruct.format(**self.pStk)
+                else:
+                    L.error('Path "%s" seems to contain formatting pattern'
+                            ' but no path-formatting context being set at the'
+                            ' moment.'%fstruct )
             with open(fstruct) as f:
                 self.fstruct = lamia.core.filesystem.Paths( yaml.load(f)[fstructConf] )
+        else:
+            self.fstruct = lamia.core.filesystem.Paths( yaml.load(fstruct)[fstructConf] )
+
+    def setup_rendering( self
+                       , templatesDirs
+                       , contexts
+                       , definitions=[]):
+        """
+        Overrides vanilla template-rendering set-up to support template paths
+        for template directories.я
+        """
+        if hasattr(self, 'pStk'):
+            assert(type(templatesDirs) is list)
+            for n, p in enumerate(templatesDirs):
+                if lamia.core.filesystem.rxFmtPat.match(p):
+                    templatesDirs[n] = p.format(**self.pStk)
+        super().setup_rendering( templatesDirs
+                               , contexts
+                               , definitions=definitions)
 
     def _main( self
              , outputDir=None
@@ -111,9 +161,9 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         """
         assert(outputDir)
         assert(fstruct)
+        self.setup_path_templating( pathContexts, pathDefinitions )
         self.setup_fstruct( fstruct, fstructConf )
         self.setup_rendering( templatesDirs, contexts, definitions )
-        self.setup_path_templating( pathContexts, pathDefinitions )
         self.t.deploy_fs_struct( outputDir
                           , self.fstruct
                           , self.pStk

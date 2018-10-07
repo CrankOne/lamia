@@ -148,6 +148,8 @@ class Configuration(collections.MutableMapping):
             initObject = {}
         elif isinstance(initObject, Configuration):
             cfg = copy.deepcopy(initObject._store)
+        elif initObject is None:
+            cfg = {}
         else:
             raise TypeError("Unexpected type for Configuration object"
                     " initialization: %s."%type(initObject))

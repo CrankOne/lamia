@@ -84,7 +84,7 @@ def render_path_templates(*args, requireComplete=True, **kwargs):
     L = logging.getLogger(__name__)
     L.debug('Generating path templates product on sets: {%s}; {%s}.'%(
           ', '.join([ '"%s"'%s for s in args])
-        , ', '.join([ '"%s"'%s for s in str(kwargs)]) ))
+        , ', '.join([ '"%s"'%s for s in kwargs.keys()]) ))
     s = os.path.join(*args)
     keys = filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)] )
     for skwargs in dict_product(**{ k : kwargs[k] for k in keys }):

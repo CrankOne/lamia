@@ -20,7 +20,9 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import abc, os, logging, sys, copy, argparse, re
-import lamia.core.configuration, lamia.logging
+import lamia.core.configuration \
+     , lamia.logging \
+     , lamia.core.task
 
 rxArg = re.compile(r'^(?P<key>\w+):(?P<backend>\w+)?=(?P<value>.*)$')
 
@@ -137,7 +139,7 @@ class BatchBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def list( self, timeout=30, popenKwargs={} ):
+    def list_jobs( self, timeout=30, popenKwargs={} ):
         """
         Retrieves a list of currently active (or recently done, if appliable)
         jobs.
@@ -149,10 +151,10 @@ def instantiate_backend( name, config, *args, **kwargs ):
     A virtual constructor for back-end instances: creates particular back-end
     instance based on its string name (cf. factory).
     """
+    L = logging.getLogger()
     backEnds = {}
     if not BatchBackend.__subclasses__():
-        L.error( "No back-ends available. Giving up." )
-        sys.exit(1)
+        raise RuntimeError( "No back-ends available." )
     for c in BatchBackend.__subclasses__():
         if c.backend_type() == name:
             return c(config, *args, **kwargs)
@@ -163,24 +165,26 @@ def instantiate_backend( name, config, *args, **kwargs ):
 # Utility imperatives
 ####################
 
-def argparse_add_common_args(p):
-    p.add_argument( '-A', '--argument', help="An argument to be forwarded" \
-            " to back-end command shell invokation. Must be avoided in mature" \
-            " code, but is still useful for the debug and development." \
-            " Expected to be given in form <key>[:<backend>]=<value>." \
-            " The <backend> parameter is optional and makes this " \
-            " specification to be only active for certain back-end."
-            , action='append' )
-    p.add_argument( '-B', '--backend', help="One of the batch back-ends" \
-            " available. Available: %s."%( ','.join([ c.backend_type() \
-                    for c in BatchBackend.__subclasses__() ]) \
-                    if len(BatchBackend.__subclasses__()) else \
-            'None back-ends are available. Consider loading some prior to' \
-            'run this code.') )
-    p.add_argument( '--backend-config', help="Configuration file for the"
-            " backend to be used." )
+gCommonParameters = {
+    'argument,A' : {
+        'help' : "An argument to be forwarded"
+            " to back-end command shell invokation. Must be avoided in mature"
+            " code, but is still useful for the debug and development."
+            " Expected to be given in form <key>[:<backend>]=<value>."
+            " The <backend> parameter is optional and makes this "
+            " specification to be only active for certain back-end.",
+        'action' : "append",
+        'dest' : 'backendArguments'
+    },
+    'backend,B' : {
+        'help' : "One of the batch back-ends available."
+    },
+    'backend_config' : {
+        'help' : "Configuration file for the backend to be used."
+    }
+}
 
-def backend_specific_subm_args( given, backend ):
+def backend_specific_args( given, backend ):
     L = logging.getLogger(__name__)
     submArgs={}
     for strPair in given or []:
@@ -200,77 +204,139 @@ def backend_specific_subm_args( given, backend ):
     return submArgs
 
 
-def job_submit_main(cmdArgs):
-    """
-    Defines argument parser object for possible future usage.
-    """
-    L = logging.getLogger(__name__)
-    L.debug('job_submit() invoked with: %s'%str(cmdArgs))
-    p = argparse.ArgumentParser( description="A job-submission wrapper.")
-    p.add_argument( '-f', '--result-format', help="Sepcifies the form of" \
-            " message being printed back upon successfull job submission." \
-            " Must be a python format() string consuming at least the {jID}"\
-            " variable (rest are backend-specific).",
-            default='jID={jID}' )
-    p.add_argument( '-o', '--stdout-log', help="Specifies a file where" \
-            " job's stdout has to be written." )
-    p.add_argument( '-e', '--stderr-log', help="Specifies a file where" \
-            " job's stdout has to be written." )
-    p.add_argument( '-J', '--job-name', help="A name of the job."
-                  , required=True )
-    p.add_argument( 'fwd', nargs=argparse.REMAINDER )
-    argparse_add_common_args(p)
-    args = p.parse_args(cmdArgs)
-    L.debug( 'Parsed: %s'%(str(args)) )
-    submArgs = backend_specific_subm_args( args.argument, args.backend )
-    B = instantiate_backend(args.backend, args.backend_config)
-    try:
-        r = B.submit( args.job_name
-                    , cmd=args.fwd
-                    , stdout=args.stdout_log, stderr=args.stderr_log
-                    , submArgs=submArgs )
-    except JListFailure as e:
-        sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
-        if not e.exception:
-            L.error( '<submission command stdout>:\n' )
-            L.error( e.output['stdout'].decode('ascii') )
-            L.error( '<submission command stderr>:\n' )
-            L.error( e.output['stderr'].decode('ascii') )
-        else:
-            L.exception( e.exception )
-    #print( args.result_format.format(**r) )
-    return 0
+def available_backends():
+    return [ c.backend_type() for c in BatchBackend.__subclasses__() ]
 
-def job_list_main(cmdArgs):
+
+class BatchTask( lamia.core.task.Task
+               , metaclass=lamia.core.task.TaskClass ):
     """
-    Defines argument parser object for possible future usage.
+    General base class for batch-operating tasks.
     """
-    L = logging.getLogger(__name__)
-    L.debug('job_list() invoked with: %s'%str(cmdArgs))
-    p = argparse.ArgumentParser( description="A job-listing wrapper.")
-    p.add_argument( '-f', '--result-format', help="Sepcifies the form of" \
-            " message being printed back upon successfull retrieval of jobs" \
-            " list. Must be a python format() string consuming at least"
-            " the {jID} and {jState} variable (rest are backend-specific).",
-            default='jID={jID} jState={jState}' )
-    argparse_add_common_args(p)
-    args = p.parse_args(cmdArgs)
-    L.debug( 'Parsed: %s'%(str(args)) )
-    submArgs = backend_specific_subm_args( args.argument, args.backend )
-    B = instantiate_backend(args.backend, args.backend_config)
-    try:
-        r = B.list( submArgs=submArgs )
-    except SubmissionFailure as e:
-        sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
-        if not e.exception:
-            L.error( '<submission command stdout>:\n' )
-            L.error( e.output['stdout'].decode('ascii') )
-            L.error( '<submission command stderr>:\n' )
-            L.error( e.output['stderr'].decode('ascii') )
-        else:
-            L.exception( e.exception )
-    #print( args.result_format.format(**r) )
-    return 0
+    __commonParameters = gCommonParameters
+
+    @property
+    def backend(self):
+        if not hasattr(self, '_backendName') \
+        or not hasattr(self, '_backendConfig'):
+            raise AssertionError("Backend attributes are not initialized yet.")
+        if not hasattr(self, '_backend'):
+            self._backend = instantiate_backend( self._backendName
+                                               , self._backendConfig )
+        return self._backend
+
+class BatchSubmittingTask( BatchTask
+                         , metaclass=lamia.core.task.TaskClass ):
+    """
+    Implements job-submitting action, utilizing certain back-end.
+    """
+    __execParameters = {
+        'result_format,f' : {
+            'help' : "Sepcifies the form of message being printed back"
+                " upon successfull job submission. Must be a python"
+                " format() string consuming at least the {jID} variable"
+                " (rest are backend-specific)."
+        },
+        'stdout_log,o' : {
+            'help' : "Specifies a file where job's stdout has to be written."
+        },
+        'stderr_log,e' : {
+            'help' : "Specifies a file where job's stdout has to be written."
+        },
+        'job_name,J' : {
+            'help' : "A name of the job."
+        },
+        '@fwd' : {
+            'nargs' : argparse.REMAINDER
+        }
+    }
+    __defaults = {
+        'result_format' : "jID={jID}"
+    }
+
+    def submit( self, fwd
+              , jobName=None
+              , stdoutLog=None, stderrLog=None
+              , backendArguments=[] ):
+        try:
+            r = self.backend.submit( jobName
+                                   , cmd=fwd
+                                   , stdout=stdoutLog, stderr=stderrLog
+                                   , backendArguments=backendArguments )
+        except JListFailure as e:
+            sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
+            if not e.exception:
+                L.error( '<submission command stdout>:\n' )
+                L.error( e.output['stdout'].decode('ascii') )
+                L.error( '<submission command stderr>:\n' )
+                L.error( e.output['stderr'].decode('ascii') )
+            else:
+                L.exception( e.exception )
+        return r
+
+    def _main( self
+             , fwd=[]
+             , backend=None, backendConfig=None
+             , stderrLog=None, stdoutLog=None
+             , jobName=None
+             , backendArguments=[]
+             , resultFormat='' ):
+        L = logging.getLogger(__name__)
+        self._backendName, self._backendConfig = backend, backendConfig
+        if not fwd:
+            self.argParser.error( 'Nothing to submit.' )
+        if not jobName:
+            self.argParser.error( 'Job name is not set.' )
+        backendArguments = backend_specific_args( backendArguments, backend )
+        r = self.submit( fwd, jobName=jobName
+                       , stdoutLog=stdoutLog, stderrLog=stderrLog
+                       , backendArguments=backendArguments )
+        sys.stdout.write( resultFormat.format(**r) )
+        return 0
+
+class BatchListingTask( BatchTask
+                      , metaclass=lamia.core.task.TaskClass ):
+    __execParameters = {
+        'result_format,f' : {
+            'help' : "Sepcifies the form of" \
+                " message being printed back upon successfull retrieval of jobs" \
+                " list. Must be a python format() string consuming at least"
+                " the {jID} and {jState} variable (rest are backend-specific)."
+        }
+    }
+    __defaults = {
+        'result_format' : 'jID={jID} jState={jState}'
+    }
+    def list_jobs(self, backendArguments=[]):
+        try:
+            r = self.backend.list_jobs( backendArguments=backendArguments )
+        except SubmissionFailure as e:
+            sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
+            if not e.exception:
+                L.error( '<submission command stdout>:\n' )
+                L.error( e.output['stdout'].decode('ascii') )
+                L.error( '<submission command stderr>:\n' )
+                L.error( e.output['stderr'].decode('ascii') )
+            else:
+                L.exception( e.exception )
+        return r
+    def _main( self
+             , backend=None, backendConfig=None
+             , backendArguments=[]
+             , resultFormat='' ):
+        """
+        Defines argument parser object for possible future usage.
+        """
+        L = logging.getLogger(__name__)
+        self._backendName, self._backendConfig = backend, backendConfig
+        r = self.list_jobs(backendArguments=backend_specific_args( backendArguments, backend ))
+        sys.stdout.write( resultFormat.format(**r) )
+        return 0
+
+# TODO: BatchQueryStatusTask -> get_status(self, jID, popenKwargs={}):
+# TODO:     BatchKillJobTask -> kill_job(self, jID, popenKwargs={}):
+# TODO:  BatchWaitForJobTask -> wait_for_job(self, jID, intervalSecs=60, popenKwargs={}):
+# TODO:    BatchDumpLogsTask -> dump_logs_for( self, jID, popenKwargs={} ):
 
 def main():
     """
@@ -279,10 +345,11 @@ def main():
     lamia.logging.setup()
     L = logging.getLogger(__name__)
     procedure = sys.argv[1] if len(sys.argv) > 1 else ''
+    t = None
     if 'submit' == procedure:
-        return job_submit_main( sys.argv[2:] )
+        t = BatchSubmittingTask()
     elif 'list' == procedure:
-        return job_list_main( sys.argv[2:] )
+        t = BatchListingTask()
     elif 'status' == procedure:
         pass
     elif 'kill' == procedure:
@@ -291,7 +358,8 @@ def main():
         pass
     elif 'wait' == procedure:
         pass
-    else:
+    return t.run(sys.argv[2:])
+    if not t:
         L.error( 'Bad procedure name given. Expected one of:\n' )
         L.error( '  submit, status, kill, dump-logs, wait\n' )
         L.error( 'To get help on certain procedure name, invoke with:\n' )
