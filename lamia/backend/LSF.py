@@ -34,6 +34,7 @@ gLSFJobStates = {
         'PEND' : 0x2,
         'RUN' : 0x2,
         'DONE' : 0x0,
+        'EXIT' : 0x0,  # yeah, but this process may hang few minutes still...
         'WAIT' : 0x2,
         'PSUSP' : 0x2,
         'USUSP' : 0x2,
@@ -241,7 +242,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         nAttempt = 0
         # Kludge: here we waiting 5 secs due to LSF feature of not showing the
         # job in bjobs list immediately after submission.
-        time.sleep(5) # TODO: is it true?
+        #time.sleep(5) # TODO: is it true?
         while True:
             nAttempt += 1
             jLst = self.get_status( jID, popenKwargs=popenKwargs )
