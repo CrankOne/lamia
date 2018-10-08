@@ -74,6 +74,26 @@ def dict_product(**kwargs):
         dct.update(scalars)
         yield dct
 
+# This strightforward inplementation seems legit, but needs more checks
+# against Python's conventions within complex keys indexing.
+def py_index_to_pdict(k):
+    if '[' not in k:
+        return k
+    else:
+        k = k.replace('[', '.')
+        k = k.replace(']', '')
+        return k
+
+def _rv_value(d, k):
+    """
+    Internal parsing function dealing with format-like indexing, e.g.:
+        some[1]
+        foo[bar][1]
+        some[other]
+    etc.
+    """
+    return dpath.get(d, py_index_to_pdict(k), separator='.')
+
 def render_path_templates(*args, requireComplete=True, **kwargs):
     """
     Renders the path according to given list of templated string and formatting
@@ -86,11 +106,24 @@ def render_path_templates(*args, requireComplete=True, **kwargs):
           ', '.join([ '"%s"'%s for s in args])
         , ', '.join([ '"%s"'%s for s in kwargs.keys()]) ))
     s = os.path.join(*args)
-    keys = filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)] )
-    for skwargs in dict_product(**{ k : kwargs[k] for k in keys }):
-        yield s.format_map(DictFormatWrapper( dict(skwargs)
-                                            , requireComplete=requireComplete )) \
-            , skwargs
+    keys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)]))
+    try:
+        for skwargs in dict_product(**{ k : _rv_value(kwargs, k) for k in keys }):
+            dfw = DictFormatWrapper( **dict(skwargs)
+                                   , requireComplete=requireComplete )
+            try:
+                np = s.format_map(dfw)
+                yield np, skwargs
+            except:
+                L.error( 'During yielding product result on sub-keyword args:'
+                    ' {%s}, turned in formatting dict with keys {%s}.'%(
+                        ', '.join([ '"%s"'%skwa for skwa in skwargs ])
+                        , ', '.join(['"%s"'%k for k in dfw.keys()]) ) )
+                raise
+    except:
+        L.error( 'During yielding the path %s on set of keys: {%s}.'%(
+            s, ', '.join(['"%s"'%k for k in keys])) )
+        raise
 
 def check_dir( path, mode=None ):
     """
@@ -176,7 +209,10 @@ class DictFormatWrapper(dict):
     """
     def __init__(self, *args, **kwargs):
         self.requireComplete=kwargs.pop('requireComplete', True)
-        super().__init__(*args, **kwargs)
+        kws_ = {}
+        for k, v in kwargs.items():
+            dpath.new( kws_, py_index_to_pdict(k), v, separator='.' )
+        super().__init__(*args, **kws_)
 
     def __missing__(self, key):
         L = logging.getLogger(__name__)
