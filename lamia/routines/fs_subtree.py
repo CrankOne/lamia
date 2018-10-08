@@ -95,7 +95,11 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                              , pathDefinitions ):
         self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
 
-    def setup_fstruct(self, fstruct, fstructConf):
+    def parse_fstruct(self, fstruct, fstructConf):
+        """
+        Returns object that typically consumed by lamia.core.filesystem.Paths
+        instance constructor.
+        """
         L = logging.getLogger(__name__)
         if type(fstruct) is str:
             m = lamia.core.filesystem.rxFmtPat.match(fstruct)
@@ -107,9 +111,9 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                             ' but no path-formatting context being set at the'
                             ' moment.'%fstruct )
             with open(fstruct) as f:
-                self.fstruct = lamia.core.filesystem.Paths( yaml.load(f)[fstructConf] )
+                return yaml.load(f)[fstructConf]
         else:
-            self.fstruct = lamia.core.filesystem.Paths( yaml.load(fstruct)[fstructConf] )
+            return yaml.load(fstruct)[fstructConf]
 
     def setup_rendering( self
                        , templatesDirs
@@ -162,7 +166,7 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         assert(outputDir)
         assert(fstruct)
         self.setup_path_templating( pathContexts, pathDefinitions )
-        self.setup_fstruct( fstruct, fstructConf )
+        self.fstruct = lamia.core.filesystem.Paths(self.parse_fstruct( fstruct, fstructConf ))
         self.setup_rendering( templatesDirs, contexts, definitions )
         self.t.deploy_fs_struct( outputDir
                           , self.fstruct

@@ -398,7 +398,12 @@ def auto_path( p
     `fStruct' is expected to be an FS subtree description. If it is omitted,
     no `@' alias could be discovered.
     """
-    m = rxFmtPat.match(p)
+    L = logging.getLogger(__name__)
+    try:
+        m = rxFmtPat.match(p)
+    except:
+        L.error('While applying to %s'%str(p))
+        raise
     if '@' == p[0]:
         if not fStruct:
             raise ValueError('Alias given, but no filesystem subtree object'
