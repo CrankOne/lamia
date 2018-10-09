@@ -125,6 +125,8 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
+        if 'q' not in bsubArgs.keys():
+            raise RuntimeError('LSF queue is not specified')  # TODO: warning
         cmd_.append( '-J%s'%jobName )
         cmd_.append( '-oo%s'%stdout )
         cmd_.append( '-eo%s'%stderr )

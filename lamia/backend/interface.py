@@ -190,7 +190,7 @@ gCommonParameters = {
             " The <backend> parameter is optional and makes this "
             " specification to be only active for certain back-end.",
         'action' : "append",
-        'dest' : 'backendArguments'
+        'dest' : 'backend_arguments'
     },
     'backend,B' : {
         'help' : "One of the batch back-ends available."
@@ -273,7 +273,7 @@ class BatchSubmittingTask( BatchTask
     def submit( self, fwd
               , jobName=None
               , stdoutLog=None, stderrLog=None
-              , backendArguments=[] ):
+              , backendArguments={} ):
         try:
             r = self.backend.submit( jobName
                                    , cmd=fwd
@@ -295,7 +295,7 @@ class BatchSubmittingTask( BatchTask
              , backend=None, backendConfig=None
              , stderrLog=None, stdoutLog=None
              , jobName=None
-             , backendArguments=[]
+             , backendArguments={}
              , resultFormat='' ):
         L = logging.getLogger(__name__)
         self._backendName, self._backendConfig = backend, backendConfig
