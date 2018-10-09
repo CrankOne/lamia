@@ -26,7 +26,7 @@ import lamia.backend.interface
 rxJSubmitted = re.compile(r'^Job <(?P<jID>\d+)> is submitted to(?: default)? queue <(?P<queue>[^>]+)>\.$')
 # A regex to parse `bsub -wX' output about jobs being currently active or
 # being recently done (`bsub -wXd).
-rxJList = re.compile( r'^(?P<jID>\d+)\s+(?P<user>\w+)\s+(?P<jState>[A-Z]+)\s+(?P<queue>\w+)\s+(?P<submHost>[\w\.]+)\s+(?P<execHost>[\w.\-]+)\s+(?P<jName>[\w.\-]+)\s+(?P<jSubTime>.+?)\s*$' )
+rxJList = re.compile( r'^(?P<jID>\d+)\s+(?P<user>\w+)\s+(?P<jState>[A-Z]+)\s+(?P<queue>\w+)\s+(?P<submHost>[\w\.]+)\s+(?P<execHost>[\w.\-]+)\s+(?P<jName>[\w.\-\[\]]+)\s+(?P<jSubTime>.+?)\s*$' )
 # All these entities has a bitflags of following meaning:
 #   0x1 denotes the general error
 #   0x2 means that we can wait for the job to finish
