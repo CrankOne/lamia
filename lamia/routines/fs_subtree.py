@@ -95,14 +95,18 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                              , pathDefinitions ):
         self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
 
-    def parse_fstruct(self, fstruct, fstructConf):
+    @staticmethod
+    def parse_fstruct( fstruct
+                     , fstructConf
+                     , pathInterpCtx={} ):
         """
         Returns object that typically consumed by lamia.core.filesystem.Paths
         instance constructor.
         """
         L = logging.getLogger(__name__)
+        fStrObj = None
         if type(fstruct) is str:
-            m = lamia.core.filesystem.rxFmtPat.match(fstruct)
+            m = lamia.core.filesystem.rxFmtPat.match(fstruct.format(**pathInterpCtx))
             if m:
                 if hasattr( self, 'pStk' ):
                     fstruct = fstruct.format(**self.pStk)
@@ -111,9 +115,23 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                             ' but no path-formatting context being set at the'
                             ' moment.'%fstruct )
             with open(fstruct) as f:
-                return yaml.load(f)[fstructConf]
+                fStrObj = yaml.load(f)
         else:
-            return yaml.load(fstruct)[fstructConf]
+            fStrObj = yaml.load(fstruct)
+        fStrVer = fStrObj.get('version', '0.0')
+        if '0.0' != 'version':  # TODO: finer versions control
+            L.warning( "File structure version %s might be"
+                    " unsupported (file \"%s\")."%(fStrVer, fstruct.name \
+                            if hasattr(fstruct, 'name') else fstruct) )
+        fStrObj = fStrObj[fstructConf]
+        if not if fStrObj[fstructConf]:
+            raise RuntimeError("Empty file structure subtree description.")
+        if 'extends' in fStrObj.keys():
+            base = DeploySubtreeTask.parse_fstruct( fStrObj['extends']['path'].format(**pathInterpCtx)
+                                                  , fStrObj['extends'].get('conf', 'default') )
+            base.update(fStrObj)
+            fStrObj = base
+        return fStrObj
 
     def setup_rendering( self
                        , templatesDirs
