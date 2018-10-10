@@ -330,7 +330,14 @@ class Paths( collections.MutableMapping ):
         """
         Returns rendered template string w.r.t. to given keyword arguments.
         """
-        pt = self._aliases[alias]
+        L = logging.getLogger(__name__)
+        try:
+            pt = self._aliases[alias]
+        except KeyError:
+            # TODO: move to dedicated exception `UnknownAlias' with available
+            # keys associated.
+            L.debug('Available aliases: %s'%(', '.join('"%s"'%a for a in self._aliases.keys())))
+            raise
         return pt.format_map(DictFormatWrapper( dict(kwargs)
                                               , requireComplete=requireComplete))
 

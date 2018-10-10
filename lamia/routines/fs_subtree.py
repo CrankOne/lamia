@@ -22,12 +22,24 @@
 Filesystem tree creating routine.
 """
 #                               *** *** ***
-import os, sys, logging, argparse, yaml
+import os, sys, logging, argparse, yaml, collections
 import lamia.logging \
      , lamia.core.templates \
      , lamia.core.filesystem \
      , lamia.core.task
 import lamia.routines.render
+#                               *** *** ***
+def _TODO_recursive_dict_update( d, u ):
+    """
+    Remove this function in favour of Stack() once it will support nested dict
+    merging.
+    """
+    for k, v in u.items():
+        if isinstance(v, collections.Mapping):
+            d[k] = _TODO_recursive_dict_update(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
 #                               *** *** ***
 gCommonParameters = {
     'fstruct,f' : {
@@ -95,18 +107,18 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                              , pathDefinitions ):
         self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
 
-    @staticmethod
-    def parse_fstruct( fstruct
-                     , fstructConf
-                     , pathInterpCtx={} ):
+    def parse_fstruct( self
+                     , fstruct
+                     , fstructConf ):
         """
         Returns object that typically consumed by lamia.core.filesystem.Paths
         instance constructor.
+        Applies path interpolating context to given string path.
         """
         L = logging.getLogger(__name__)
         fStrObj = None
         if type(fstruct) is str:
-            m = lamia.core.filesystem.rxFmtPat.match(fstruct.format(**pathInterpCtx))
+            m = lamia.core.filesystem.rxFmtPat.match(fstruct)
             if m:
                 if hasattr( self, 'pStk' ):
                     fstruct = fstruct.format(**self.pStk)
@@ -119,19 +131,25 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         else:
             fStrObj = yaml.load(fstruct)
         fStrVer = fStrObj.get('version', '0.0')
-        if '0.0' != 'version':  # TODO: finer versions control
+        if '0.0' != fStrVer:  # TODO: finer versions control
             L.warning( "File structure version %s might be"
                     " unsupported (file \"%s\")."%(fStrVer, fstruct.name \
                             if hasattr(fstruct, 'name') else fstruct) )
         fStrObj = fStrObj[fstructConf]
-        if not if fStrObj[fstructConf]:
+        if not fStrObj:
             raise RuntimeError("Empty file structure subtree description.")
         if 'extends' in fStrObj.keys():
-            base = DeploySubtreeTask.parse_fstruct( fStrObj['extends']['path'].format(**pathInterpCtx)
-                                                  , fStrObj['extends'].get('conf', 'default') )
-            base.update(fStrObj)
-            fStrObj = base
-        return fStrObj
+            L.debug( ' ..loading base file structure description "%s"'%(fStrObj['extends']['path']) )
+            base = self.parse_fstruct( fStrObj['extends']['path']
+                                     , fStrObj['extends'].get('conf', 'default') )
+            fStrObj.pop('extends')  # wipe it out since it is not an FS entry
+            #base.update(fStrObj)
+            fStrObj = _TODO_recursive_dict_update( base, fStrObj )
+            #fStrObj = lamia.core.configuration.Stack([ base, fStrObj ])
+            # TODO: use it instead of hand-written direct update, once stack
+            # will support nested dictionaries
+            print( 'YYY', dict(fStrObj) )  # XXX
+        return dict(fStrObj)
 
     def setup_rendering( self
                        , templatesDirs
@@ -184,7 +202,8 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         assert(outputDir)
         assert(fstruct)
         self.setup_path_templating( pathContexts, pathDefinitions )
-        self.fstruct = lamia.core.filesystem.Paths(self.parse_fstruct( fstruct, fstructConf ))
+        self.fstruct = lamia.core.filesystem.Paths(self.parse_fstruct(
+                            fstruct, fstructConf ))
         self.setup_rendering( templatesDirs, contexts, definitions )
         self.t.deploy_fs_struct( outputDir
                           , self.fstruct
