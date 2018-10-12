@@ -49,44 +49,15 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
     """
     The batch-submitting implementation for LSF.
     """
+    
     def backend_type():
         return 'LSF'
 
+    
     def __init__( self, config ):
         super().__init__(config)
 
-    def _bjobs(self, cmd_, timeout=30, popenKwargs={}):
-        # Submit the job and check its result.
-        try:
-            # Sets the default popen's kwargs and override it by user's kwargs
-            pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
-                                , 'stderr' : subprocess.PIPE
-                                , 'universal_newlines' : True })
-            pkw.update(popenKwargs)
-            bjP = subprocess.Popen( cmd_, **pkw )
-            L.debug('Performing subprocess invocation:')
-            L.debug("  $ %s"%(' '.join(cmd_)) )
-            L.debug("Supplementary popen() arguments: %s."%str(pkw) )
-            out, err = bjP.communicate( timeout=timeout )
-            rc = bjP.returncode
-            #m = rxJSubmitted.match( out.decode('ascii') )  # TODO
-        except Exception as e:
-            raise lamia.backend.interface.JListFailure( exception=e )
-        if not m or 0 != rc:
-            raise lamia.backend.interface.JListFailure(
-                    output={ 'stdout' : out
-                           , 'stderr' : err
-                           , 'rc' : rc })
-        jobsList = []
-        for l in iter(out.readline, ''):
-            m = rxJList.match(l)
-            if not m:
-                L.warning('Unable to interpret bjobs output line: "%s"'%l)
-                continue
-            jobsList.append(m.groupdict())
-        L.debug( 'bjobs output of %d entries treated'%len(jobsList) )
-        return jobsList
-
+    
     def submit( self, jobName
                     , cmd=None
                     , stdout=None, stderr=None
@@ -104,8 +75,8 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         # Form the full bsub tuple:
         #- Prepare the bsub arguments:
         cmd_ = [self.cfg['execs.bsub']]
-        bsubArgs = {} #copy.deepcopy(self.cfg['bsub'])
-        bsubArgs.update(backendArguments)
+        bsubArgs = {} ## init args
+        bsubArgs.update(backendArguments)  ## adds args of sub from backendArgs
         # Form the LSF submission arguments
         for k, v in bsubArgs.items():
             cmd_.append( '-%s'%k )
@@ -129,7 +100,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         elif type(cmd) is str:
             cmd_ += shlex.split(cmd)
         elif type(cmd_) is not list:
-            raise TypeError( "Forst argument for submit is expected to be' \
+            raise TypeError( "First argument for submit is expected to be' \
                     ' either str or list. Got %s."%type(cmd) )
         if cmd:
             cmd_ += copy.deepcopy(cmd)
@@ -163,6 +134,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         L.info( 'LSF job submitted: {queue}/{jID}'.format(**m.groupdict()) )
         return m.groupdict()['jID'], m.groupdict()['queue']
 
+    
     def list_jobs(self, timeout=30, backendArguments=[], popenKwargs={}):
         L = logging.getLogger(__name__)
         # Form the full bjobs tuple:
