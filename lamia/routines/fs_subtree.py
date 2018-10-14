@@ -105,6 +105,10 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
     def setup_path_templating( self
                              , pathContexts
                              , pathDefinitions ):
+        """
+        Based on given paths context and path definitions will set up the
+        `self.pStk' property.
+        """
         self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
 
     def parse_fstruct( self
@@ -114,6 +118,8 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         Returns object that typically consumed by lamia.core.filesystem.Paths
         instance constructor.
         Applies path interpolating context to given string path.
+        Has no side effects on the object itself (no self.XXX properties
+        added).
         """
         L = logging.getLogger(__name__)
         fStrObj = None
@@ -157,7 +163,14 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                        , definitions=[]):
         """
         Overrides vanilla template-rendering set-up to support template paths
-        for template directories.я
+        for template directories. Side effects caused by parent's method
+        invocation:
+            self.rStk -- runtime stack
+            self.tli -- Lamia template-loading interpolators dictionary
+            self.fltr -- Lamia template filters object
+            self._t -- lamia Templates instance (accessible by the self.t)
+        If self.pStk was set prior to invocation, it might be used by templates
+        dir paths containing python-formatting placeholders (e.g. {foo}).
         """
         if hasattr(self, 'pStk'):
             assert(type(templatesDirs) is list)
@@ -202,11 +215,11 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         assert(outputDir)
         assert(fstruct)
         self.setup_path_templating( pathContexts, pathDefinitions )
-        self.fstruct = lamia.core.filesystem.Paths(self.parse_fstruct(
+        fstruct = lamia.core.filesystem.Paths(self.parse_fstruct(
                             fstruct, fstructConf ))
         self.setup_rendering( templatesDirs, contexts, definitions )
         self.t.deploy_fs_struct( outputDir
-                          , self.fstruct
+                          , fstruct
                           , self.pStk
                           , templateContext=self.rStk )
 #                               *** *** ***
