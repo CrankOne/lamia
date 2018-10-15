@@ -91,6 +91,13 @@ class RenderTemplateTask( lamia.core.task.Task
                        , templatesDirs
                        , contexts
                        , definitions=[]):
+        """
+        Based on given input parameters, will set up properties:
+            self.rStk -- runtime stack
+            self.tli -- Lamia template-loading interpolators dictionary
+            self.fltr -- Lamia template filters object
+            self._t -- lamia Templates instance (accessible by the self.t)
+        """
         self.rStk = lamia.core.configuration.compose_stack(contexts, definitions)
         self.tli = lamia.core.interpolation.Processor()
         self.tli['PATH'] = os.path.realpath

@@ -70,6 +70,10 @@ class BatchBackend(abc.ABC):
     Defines basic properties system for every batch-processing backend.
     The few abstract method designed for job submission, its status retreival
     and interruption.
+    The only demand for these method is compatibility of jID. It has be an
+    instance of arbitrary type that must be returned by submit() and understood
+    by kill.../wait.../get_status/.../etc. methods.
+    TODO: support for job arrays.
     """
     def __init__( self, config ):
         L = logging.getLogger(__name__)
@@ -79,6 +83,10 @@ class BatchBackend(abc.ABC):
     @property
     @abc.abstractmethod
     def backend_type(self):
+        """
+        Must return a string identifying this back-end (e.g.
+        LSF/HTCondor/etc.)
+        """
         pass
 
     @abc.abstractmethod
@@ -99,14 +107,17 @@ class BatchBackend(abc.ABC):
         overrides what is given to ctr.
         The `popenKwargs' is rarely used dictionary of arguments forwarded to
         Python's subprocess.Popen() ctr.
+        Returns the two objects: a job ID and the dictionary of arbitrary
+        properties that user code might found useful (but we do not demand it
+        be of some certain form).
         """
         pass
 
     @abc.abstractmethod
-    def get_status(self, jID, popenKwargs={}):
+    def get_status(self, jID, backendArguments={}, popenKwargs={}):
         """
         By given `jID' (of possibly arbitrary type), shall return "active job
-        properties object"
+        properties object".
         """
         pass
 
@@ -119,7 +130,12 @@ class BatchBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def wait_for_job(self, jID, intervalSecs=60, popenKwargs={}):
+    def wait_for_job( self, jID
+                    , nAttempts=0
+                    , intervalSecs=60
+                    , backendArguments={}
+                    , popenKwargs={}
+                    , report=True ):
         """
         Will await for job of given `jID' to finish, periodically retrieving
         it's status.
@@ -142,7 +158,7 @@ class BatchBackend(abc.ABC):
     def list_jobs( self, timeout=30, popenKwargs={} ):
         """
         Retrieves a list of currently active (or recently done, if appliable)
-        jobs.
+        jobs. Returns a dictionary, indexed with jobID object.
         """
         pass
 
@@ -174,7 +190,7 @@ gCommonParameters = {
             " The <backend> parameter is optional and makes this "
             " specification to be only active for certain back-end.",
         'action' : "append",
-        'dest' : 'backendArguments'
+        'dest' : 'backend_arguments'
     },
     'backend,B' : {
         'help' : "One of the batch back-ends available."
@@ -257,7 +273,7 @@ class BatchSubmittingTask( BatchTask
     def submit( self, fwd
               , jobName=None
               , stdoutLog=None, stderrLog=None
-              , backendArguments=[] ):
+              , backendArguments={} ):
         try:
             r = self.backend.submit( jobName
                                    , cmd=fwd
@@ -279,7 +295,7 @@ class BatchSubmittingTask( BatchTask
              , backend=None, backendConfig=None
              , stderrLog=None, stdoutLog=None
              , jobName=None
-             , backendArguments=[]
+             , backendArguments={}
              , resultFormat='' ):
         L = logging.getLogger(__name__)
         self._backendName, self._backendConfig = backend, backendConfig

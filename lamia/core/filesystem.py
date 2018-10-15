@@ -1,11 +1,30 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2018 Renat R. Dusaev <crank@qcrypt.org>
+# Author: Renat R. Dusaev <crank@qcrypt.org>
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
+Various auxilliary filesystem routines, coming in hand for lamia procedures.
+"""
 import os, sys, errno, collections, re, dpath, yaml, itertools, logging, copy \
      , glob, contextlib, argparse
 import lamia.core.interpolation, lamia.core.configuration
 from string import Formatter
-
-"""
-Various auxilliary filesystem routines, coming in hand for lamia procedures.
-"""
 
 rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@/\n]+)(?:@(?P<alias>[_\-\w]+))?$'
 rxFSStruct = re.compile(rxsFSStruct)
@@ -74,6 +93,26 @@ def dict_product(**kwargs):
         dct.update(scalars)
         yield dct
 
+# This strightforward inplementation seems legit, but needs more checks
+# against Python's conventions within complex keys indexing.
+def py_index_to_pdict(k):
+    if '[' not in k:
+        return k
+    else:
+        k = k.replace('[', '.')
+        k = k.replace(']', '')
+        return k
+
+def _rv_value(d, k):
+    """
+    Internal parsing function dealing with format-like indexing, e.g.:
+        some[1]
+        foo[bar][1]
+        some[other]
+    etc.
+    """
+    return dpath.get(d, py_index_to_pdict(k), separator='.')
+
 def render_path_templates(*args, requireComplete=True, **kwargs):
     """
     Renders the path according to given list of templated string and formatting
@@ -86,11 +125,24 @@ def render_path_templates(*args, requireComplete=True, **kwargs):
           ', '.join([ '"%s"'%s for s in args])
         , ', '.join([ '"%s"'%s for s in kwargs.keys()]) ))
     s = os.path.join(*args)
-    keys = filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)] )
-    for skwargs in dict_product(**{ k : kwargs[k] for k in keys }):
-        yield s.format_map(DictFormatWrapper( dict(skwargs)
-                                            , requireComplete=requireComplete )) \
-            , skwargs
+    keys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)]))
+    try:
+        for skwargs in dict_product(**{ k : _rv_value(kwargs, k) for k in keys }):
+            dfw = DictFormatWrapper( **dict(skwargs)
+                                   , requireComplete=requireComplete )
+            try:
+                np = s.format_map(dfw)
+                yield np, skwargs
+            except:
+                L.error( 'During yielding product result on sub-keyword args:'
+                    ' {%s}, turned in formatting dict with keys {%s}.'%(
+                        ', '.join([ '"%s"'%skwa for skwa in skwargs ])
+                        , ', '.join(['"%s"'%k for k in dfw.keys()]) ) )
+                raise
+    except:
+        L.error( 'During yielding the path %s on set of keys: {%s}.'%(
+            s, ', '.join(['"%s"'%k for k in keys])) )
+        raise
 
 def check_dir( path, mode=None ):
     """
@@ -176,7 +228,10 @@ class DictFormatWrapper(dict):
     """
     def __init__(self, *args, **kwargs):
         self.requireComplete=kwargs.pop('requireComplete', True)
-        super().__init__(*args, **kwargs)
+        kws_ = {}
+        for k, v in kwargs.items():
+            dpath.new( kws_, py_index_to_pdict(k), v, separator='.' )
+        super().__init__(*args, **kws_)
 
     def __missing__(self, key):
         L = logging.getLogger(__name__)
@@ -275,7 +330,14 @@ class Paths( collections.MutableMapping ):
         """
         Returns rendered template string w.r.t. to given keyword arguments.
         """
-        pt = self._aliases[alias]
+        L = logging.getLogger(__name__)
+        try:
+            pt = self._aliases[alias]
+        except KeyError:
+            # TODO: move to dedicated exception `UnknownAlias' with available
+            # keys associated.
+            L.debug('Available aliases: %s'%(', '.join('"%s"'%a for a in self._aliases.keys())))
+            raise
         return pt.format_map(DictFormatWrapper( dict(kwargs)
                                               , requireComplete=requireComplete))
 
@@ -398,7 +460,12 @@ def auto_path( p
     `fStruct' is expected to be an FS subtree description. If it is omitted,
     no `@' alias could be discovered.
     """
-    m = rxFmtPat.match(p)
+    L = logging.getLogger(__name__)
+    try:
+        m = rxFmtPat.match(p)
+    except:
+        L.error('While applying to %s'%str(p))
+        raise
     if '@' == p[0]:
         if not fStruct:
             raise ValueError('Alias given, but no filesystem subtree object'

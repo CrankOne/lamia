@@ -1,4 +1,48 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2018 Renat R. Dusaev <crank@qcrypt.org>
+# Author: Renat R. Dusaev <crank@qcrypt.org>
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
+Lamia module configuration processing module.
+
+The main concept of this module is an idea of stacked configuration objects:
+  - The "configuration object" represented here by `Configuration' class is
+basically a classic Python dictionary with `dpath'-based element querying.
+  - The "stacking" of configuration objects means that they may override each
+other, in a way like native Python `dict.update()' method does, except for
+retaining the previous state. One can "push" configuration object in the top
+of the stack causing new object to shadow present entries of the previous one
+(so, e.g., the {'foo':2} on top of {'foo':1} will shadow 'foo' and
+myStack['foo'] will return `2').
+  If the top entry has no particular entry, it still might be found below on
+the stack unless it was explicitly deleted on some level.
+
+Planned (TODO/not yet fully implemented):
+The `Stack' class also offers some command-line adopted DSL for managing
+collections within `Configuration' object. Examples:
+    foo=1       # define a scalar named "foo" with value `1'
+    ~bar        # un-define entry "bar"
+    spam.=1     # define/apend a list named "spam" with value 1
+    egg=a:12    # define/append a dictionary "egg" with entry "a":`12'
+    spam~=foo:  # remove element "foo" from list "spam"
+    ...etc.
+"""
 import yaml, dpath.util, copy, collections, logging, sys \
      , configparser, json, yaml, re, argparse
 import lamia.core.interpolation
@@ -6,18 +50,20 @@ from io import IOBase
 from urllib.parse import urlparse
 from functools import reduce
 
-"""
-Lamia module configuration files processing module.
-"""
-
 DPSP = '.'
 gSupportedShebangs = set({'// JSON', '# YAML', '; INI'})
 
-gRxConfExpr=re.compile(r'^~?[A-Za-z_][\w.-]+(?:[+-]?=.+)?$')
+# Generic validation expression for command-line parameter overriding
+gRxConfExpr=re.compile(r'^~?[A-Za-z_][\w.-]+(?:[+.-~]?=.+)?$')
+# For collection-modification actions, will yield either <name:value> pair (for
+# dicts), or only <value> (for lists).
+gRxCollectionOperation=re.compile(r'^(?:(?P<name>[^:]+)(?<!\\):)?(?P<value>.+)?$')
+# Semantic parsers for command-line parameter overriding
 gRxConfExprSemantics = {
         'decl-scalar' : re.compile( r'^(?P<name>[A-Za-z][\w.-]+)=(?P<value>(?:\\,|[^,\n])+)$' ),
-        'undef'  : re.compile( r'^~(?P<name>[A-Za-z][\w.-]+)$' )
-        # TODO: 'modify-list', 'declare-list', etc.
+              'undef' : re.compile( r'^~(?P<name>[A-Za-z][\w.-]+)$' ),
+          'cltAppend' : re.compile( r'^(?P<name>[A-Za-z_][\w.-]+)\.=(?P<value>.+)?$' ),
+             'cltPop' : re.compile( r'^(?P<name>[A-Za-z_][\w.-]+)~=(?P<value>.+)?$' )
     }
 
 class StackTagError(RuntimeError):
@@ -102,7 +148,6 @@ def conf_arg_expr(expr):
     """
     argparse's custom validator for config-manipulation expressions.
     """
-    # NOTE useful pattern: ^(?P<name>[^=]+)(?<!\\)=(?P<val>.+)$
     m = gRxConfExpr.match(expr)
     if not m:
         raise argparse.ArgumentTypeError( "'{}' is not a valid lamia.config"
@@ -359,8 +404,20 @@ class Stack(collections.MutableMapping):
         elif 'undef' == expr['do']:
             del(self[expr['name']])
             L.debug( 'Entry "%s" deleted from stack.'%( expr['name'] ) )
+        elif 'cltAppend' == expr['do']:
+            pName, pVal = expr['name'], expr['value']
+            vm = gRxCollectionOperation.match(expr['value'])
+            cn, cv = vm.groupdict()['name'], vm.groupdict()['value']
+            if pName not in self:
+                L.debug( 'Adding new collection "%s".'%pName )
+            raise NotImplementedError('TODO: collections operations')
+        elif 'cltPop' == expr['do']:
+            pName, pVal = expr['name'], expr['value']
+            if pName not in self:
+                L.debug( 'Won\'t remove "%s" from collection "%s" since'
+                        ' it doesn\'t exist.'%(pName, pVal) )
+            raise NotImplementedError('TODO: collections operations')
         else:
-            # TODO ...
             raise NotImplementedError('TODO: support for "%s"'
                     ' conf-overriding action.')
 
