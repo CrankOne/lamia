@@ -188,9 +188,11 @@ class TaskClass(type):
         if not hasTaskBase:
             raise AssertionError( "Class `%s' is not derived from `%s'."%(
                 cls.__name__, Task.__name__) )
+        L.debug('Defining new class "%s" with attribute dict keys: %s.'%(
+            clsname, ' '.join( '"%s"'%k for k in attributedict.keys() )))
         # Inject getters
         cumulativeGetters = ['common_parameters']
-        if attributedict.pop('_%s__cumulativeDefaults'%cls.__name__, False):
+        if not attributedict.pop('_%s__cumulativeDefaults'%cls.__name__, False):
             attributedict['get_defaults'] = classmethod( lambda cls :
                     getattr(cls, '_%s__defaults'%cls.__name__) )
         else:
