@@ -61,9 +61,11 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
     """
     The batch-submitting implementation for LSF.
     """
+    
     def backend_type():
         return 'LSF'
 
+    
     def __init__( self, config ):
         super().__init__(config)
 
@@ -145,7 +147,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         elif type(cmd) is str:
             cmd_ += shlex.split(cmd)
         elif type(cmd_) is not list:
-            raise TypeError( "Forst argument for submit is expected to be' \
+            raise TypeError( "First argument for submit is expected to be' \
                     ' either str or list. Got %s."%type(cmd) )
         if cmd:
             cmd_ += copy.deepcopy(cmd)
