@@ -154,7 +154,6 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
             #fStrObj = lamia.core.configuration.Stack([ base, fStrObj ])
             # TODO: use it instead of hand-written direct update, once stack
             # will support nested dictionaries
-            print( 'YYY', dict(fStrObj) )  # XXX
         return dict(fStrObj)
 
     def setup_rendering( self
