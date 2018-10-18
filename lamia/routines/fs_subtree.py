@@ -162,12 +162,8 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                        , definitions=[]):
         """
         Overrides vanilla template-rendering set-up to support template paths
-        for template directories. Side effects caused by parent's method
-        invocation:
-            self.rStk -- runtime stack
-            self.tli -- Lamia template-loading interpolators dictionary
-            self.fltr -- Lamia template filters object
-            self._t -- lamia Templates instance (accessible by the self.t)
+        for template directories and context file paths. Side effects caused by
+        parent's method invocation are the same as in superclass.
         If self.pStk was set prior to invocation, it might be used by templates
         dir paths containing python-formatting placeholders (e.g. {foo}).
         """
@@ -176,6 +172,11 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
             for n, p in enumerate(templatesDirs):
                 if lamia.core.filesystem.rxFmtPat.match(p):
                     templatesDirs[n] = p.format(**self.pStk)
+            assert(type(contexts) is list)
+            for ctxPath in enumerate(n, contexts):
+                if type(ctxPath) is not str: continue
+                if lamia.core.filesystem.rxFmtPat.match(ctxPath):
+                    contexts[n] = ctxPath.format(**self.pStk)
         super().setup_rendering( templatesDirs
                                , contexts
                                , definitions=definitions)

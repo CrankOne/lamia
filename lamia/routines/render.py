@@ -96,21 +96,17 @@ class RenderTemplateTask( lamia.core.task.Task
             self.rStk -- runtime stack
             self.tli -- Lamia template-loading interpolators dictionary
             self.fltr -- Lamia template filters object
-            self._t -- lamia Templates instance (accessible by the self.t)
+            self.t -- lamia Templates instance (accessible by the self.t)
         """
         self.rStk = lamia.core.configuration.compose_stack(contexts, definitions)
         self.tli = lamia.core.interpolation.Processor()
         self.tli['PATH'] = os.path.realpath
         self.fltrs = { 'abspath'    : lamia.core.templates.AbsPathFilter(os.getcwd())
                      , 'commonpath' : lamia.core.templates.CommonPathFilter(os.getcwd()) }
-        self._t = lamia.core.templates.Templates( templatesDirs
+        self.t = lamia.core.templates.Templates( templatesDirs
                                       , loaderInterpolators=self.tli
                                       , additionalFilters=self.fltrs
                                       , extensions=['jinja2.ext.do'] )
-
-    @property
-    def t(self):
-        return self._t
 
     def _main( self
              , template=None
