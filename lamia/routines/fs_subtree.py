@@ -173,7 +173,7 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                 if lamia.core.filesystem.rxFmtPat.match(p):
                     templatesDirs[n] = p.format(**self.pStk)
             assert(type(contexts) is list)
-            for ctxPath in enumerate(n, contexts):
+            for n, ctxPath in enumerate(contexts):
                 if type(ctxPath) is not str: continue
                 if lamia.core.filesystem.rxFmtPat.match(ctxPath):
                     contexts[n] = ctxPath.format(**self.pStk)
