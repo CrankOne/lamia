@@ -20,32 +20,26 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import logging, os, copy, subprocess, htcondor
+import logging, os, copy, subprocess
 import lamia.backend.interface
 
-
-"""
-The rotuines for task submission on HTCondor clusters steered by BASH script.
-"""
-
-gPySubConfigs = {
-    'cmd' : '',
-    'arguments' : '',
+gSubConfigs = {
     'output' : 'output/HTCondor.out',
     'error' : 'error/HTCondor.err',
-    'userLog' : 'log/HTCondor.log',
-    'ShouldTransferFiles' : 'YES',
+    'log' : 'log/HTCondor.log',
+    'should_transfer_files' : 'YES',
     'when_to_transfer_output' : 'ON_EXIT'
 }
 
-class HTCondorPyBackend(lamia.backend.interface.BatchBackend):
+class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
     """
     The batch-processing back-end implementation for HTCondor.
-    Relies on third-party Pythonic bindings for HTCondor facility (module
-    `htcondor')
+    Relies on manually-written ClassAd files and shell utilities.
+    NOTE: kept for historical reasons only, dev/debugging.
     """
+
     def backend_type():
-        return 'HTCondor'
+        return 'HTCondorShell'
 
     def __init__(self, config):
         super().__init__(config)
@@ -62,21 +56,37 @@ class HTCondorPyBackend(lamia.backend.interface.BatchBackend):
         Will forward `cmd' as a string within the `subprocess.Popen'
         """
         L = logging.getLogger(__name__)
-        # building ClassAd
+        # creating .sub file
+        f = open('file.sub', 'w+')
         if (type(cmd) is not list):
             raise TypeError( "First argument is expected to be a list' \
                             ' not a %s"%type(cmd) )
+        L.debug("Started to build file.sub")
+        f.write("executable = {0}\n".format(cmd[0]))
+        f.write("arguments = ")
+        for i in range(len(cmd))[1:]:
+            f.write("{0} ".format(cmd[i]))
+        f.write("\n")
         if stdout:
-            gPySubConfigs.update({'output' : stdout})
+            gSubConfigs.update({'output' : stdout})
         if stderr:
-            gPySubConfigs.update({'error' : stderr})
-        gPySubConfigs['cmd'] = cmd[0]
-        gPySubConfigs['arguments'] = ' '.join(cmd[1:])
+            gSubConfigs.update({'error'  : stderr})
+        for k, v in gSubConfigs.items():
+            f.write("{0} = {1}\n".format(k, v))
+        f.write("queue 1\n")
+        f.close()
+        L.debug("file.sub was built\n")
+        #forming the command line
+        cmd_ = ['condor_submit', 'file.sub']
+        L.debug("Command for submittion is %s"%(" ".join(cmd_)))
         #submitting the job
-        schedd = htcondor.Schedd()
-        schedd.submit(gPySubConfigs)
-        L.debug("Command is %s"%(' '.join(cmd)))
-        # TODO: to take configs from the config directory, not from local
+        pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
+                            , 'stderr' : subprocess.PIPE
+                            , 'universal_newlines' : True })
+        pkw.update(popenKwargs)
+        L.debug("Popen arguments are %s"%pkw)
+        submJob = subprocess.Popen(cmd_, **pkw)
+        #message = subprocess.check_output(cmd_)
         # TODO: to build the properties to return
         return {'jID':'1', 'queue':'1'}
 
@@ -94,3 +104,4 @@ class HTCondorPyBackend(lamia.backend.interface.BatchBackend):
 
     def wait_for_job(self, jID, popenKwargs={}):
         pass
+

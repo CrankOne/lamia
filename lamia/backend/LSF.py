@@ -59,13 +59,11 @@ gDefaults = {
 
 class LSFBackend(lamia.backend.interface.BatchBackend):
     """
-    The batch-submitting implementation for LSF.
+    The batch-processing back-end implementation for LSF.
     """
-    
     def backend_type():
         return 'LSF'
 
-    
     def __init__( self, config ):
         super().__init__(config)
 
