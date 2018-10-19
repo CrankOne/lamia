@@ -93,4 +93,9 @@ class HTCondorPyBackend(lamia.backend.interface.BatchBackend):
         pass
 
     def wait_for_job(self, jID, popenKwargs={}):
+        """
+        See:
+            https://www-auth.cs.wisc.edu/lists/htcondor-users/2014-January/msg00152.shtml
+            https://github.com/DyogenIBENS/CondorViaPython/blob/master/condor.py#L115
+        """
         pass
