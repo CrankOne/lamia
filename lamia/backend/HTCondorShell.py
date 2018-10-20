@@ -44,7 +44,7 @@ gDefaults = {
                 'universe' : 'vanilla',
                 'userLog' : 'htcondor.$(Process).log',  # TODO: exec-specific
                 'should_transfer_files' : 'YES',
-                'environment' : '"HTCONDOR_JOBINDEX=$(Process)"'  # NOTE: mandatory
+                'environment' : '"HTCONDOR_JOBINDEX=$(Process)"',  # NOTE: mandatory
                 'when_to_transfer_output' : 'ON_EXIT'
             }
         }
@@ -98,14 +98,14 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         # submission file ad-hoc seems to be a better alternative since ClassAd
         # syntax is pretty straightforward, even what is concerned `queue'
         # keyword.
-        cadDict = copy.deepcopy(self.cfg['classAds.submit'])
+        cad = copy.deepcopy(self.cfg['classAds.submit'])
         cad["executable"] = os.path.abspath(cmd[0])
         if 'submissionFile' not in backendArguments:
             dn, fexec = os.path.split(cad["executable"])
             submissionFilePath = os.path.join( dn, fexec + '.htcondor-sub')
         else:
             submissionFilePath = backendArguments['submissionFile']
-        if userLogFile not in backendArguments:
+        if 'userLogFile' not in backendArguments:
             dn, fexec = os.path.split(cad["executable"])
             uLogFilePath = os.path.join( dn, fexec + '.htcondor-log')
         else:
@@ -120,10 +120,18 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             "userLog" : uLogFilePath
         })
         if 'classAd' in backendArguments:
-            cadDict.update( backendArguments['classAd'] )
-        with open(submissionFilePath) as f:
-            for k, v in cadDict.items():
-                f.write('%s = %s\n')
+            cad.update( backendArguments['classAd'] )
+        with open(submissionFilePath, 'w') as f:
+            for k, v in cad.items():
+                if type(v) is list \
+                or type(v) is tuple:
+                    strV = ' '.join(v)
+                elif type(v) in (int, float, str):
+                    strV = str(v)
+                else:
+                    raise TypeError('Can not serialize type `%s\' into classAd'
+                        ' file.'%type(v).__name__ )
+                f.write( '%s = %s\n'%(k, strV) )
         # Submission command:
         cmd_ = [ self.cfg['execs.condorSubmit'], submissionFilePath
                , '-terse'
@@ -144,6 +152,13 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         except Exception as e:
             raise lamia.backend.interface.SubmissionFailure( exception=e )
         if not m or 0 != rc:
+            if 0 != rc:
+                L.error( '`%s\' exited with code %d; stderr:\n%s'%(
+                    self.cfg['execs.condorSubmit'],
+                    rc, err) )
+            if not m:
+                L.error( 'Unable to parse output from %s; stdout:\n%s'%(
+                    self.cfg['execs.condorSubmit'], out) )
             raise lamia.backend.interface.SubmissionFailure(
                     output={ 'stdout' : out
                            , 'stderr' : err
@@ -154,12 +169,13 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         jidEnd = [int(a) for a in jidEnd]
         if jidBgn == jidEnd:
             ret = { 'jID' : jidBgn }
-            L.info( 'Single HTCondor job submitted: ClusterID=%d, ProcID=%d.'%(*jidBgn) )
+            L.info( 'Single HTCondor job submitted:'
+                ' ClusterID=%d, ProcID=%d.'%(jidBgn[0], jidBgn[1]) )
         else:
             ret = { 'jID' : [jidBgn, jidEnd] }
             L.info( 'Multiple HTCondor jobs submitted: %d.%d - %d.%d.'%(
                 jidBgn[0], jidBgn[1], jidEnd[0], jidEnd[1] ) )
-        return ret, cadDict
+        return ret, cad
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass
@@ -208,13 +224,57 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         the user log file from HTCondor in order to freeze execution until
         certain job is done. Note, that waiting process normally will be
         periodically interrupted in order to print the logging message if
-        `report' is `True'.
+        `report' is `True'. When `condor_wait' stops waiting due to time limit,
+        it prints "Time expired." string to `stdout' and exit with code 1.
         The util requires HTCondor log to query the status. Hence, we expect it
         be given within the jID dict.
         """
+        assert('jID' in jID[0])  # some job identifier tuple must be in dict
+        assert('userLog' in jID[1])  # 'userLog' must be in classAd dict
         L = logging.getLogger(__name__)
         nAttempt = 0
+        cmd_ = [ self.cfg['execs.condorWait'] ]
+        # If interval in secs is set, append with `-wait <nSecs>'. Note, that
+        # `condor_wait' will return `1' exit code upon giving up.
+        if intervalSecs:
+            cmd_ += ['-wait', str(intervalSecs)]
+        # ^^^ Signature: $ condor_wait [-wait intervalSecs] logFile [ClusterID.JobID]
+        cmd_ += [jID[1]['userLog']]
+        # If jID object refers to job array (not a single clusterID.procID), we
+        # have to wait for all of them (thus, not specifying this argument at
+        # all).
+        if type(jID[0]['jID']) is tuple:
+            # this is a single job
+            cmd_ += ['%d.%d'%(jID[0]['jID'][0], jID[0]['jID'][1])]
+        # Form popen() keyword arguments:
+        pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
+                            , 'stderr' : subprocess.PIPE
+                            , 'universal_newlines' : True })
+        pkw.update(popenKwargs)
         while True:
             nAttempt += 1
-            raise NotImplementedError('Here be dragons...')  # TODO
+            p = subprocess.Popen( cmd_, **pkw )
+            out, err = p.communicate()
+            rc = p.returncode
+            if 1 == rc and intervalSecs and 'Time expired.' in out:
+                # This is expected.
+                if 0 != nAttempts and nAttempt >= nAttempts:
+                    L.warning("Exit waiting loop due to number of attemps"
+                    " exceed.")
+                    break
+                if report:
+                    L.info( " ..waiting for the job(s) to finish for at"
+                    " least %d secs more%s."%(intervalSecs
+                    , '' if not nAttempt else '%d/%d'%(nAttempt, nAttempts) ) )
+            elif 0 == rc:
+                L.info( "  ..done waiting for job(s) to finish." )
+                break
+            else:
+                L.error( "Unexpected results for"
+                    " invocation $ %s"%(' '.join(cmd_)))
+                raise lamia.backend.interface.SubmissionFailure(
+                    output={ 'stdout' : out
+                           , 'stderr' : err
+                           , 'rc' : rc })
+
 
