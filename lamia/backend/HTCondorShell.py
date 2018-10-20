@@ -42,8 +42,7 @@ gDefaults = {
         'classAds' : {
             'submit' : {
                 'universe' : 'vanilla',
-                'userLog' : 'htcondor.$(Process).log',  # TODO: exec-specific
-                'should_transfer_files' : 'YES',
+                'should_transfer_files' : 'NO',  # wince wi're on the share
                 'environment' : '"HTCONDOR_JOBINDEX=$(Process)"',  # NOTE: mandatory
                 'when_to_transfer_output' : 'ON_EXIT'
             }
