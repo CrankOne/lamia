@@ -25,12 +25,14 @@ import lamia.backend.interface
 
 
 """
-The rotuines for task submission on HTCondor clusters steered by BASH script.
+The rotuines for task submission on HTCondor clusters.
+
+Since official Python bindings for HTCondor is quite rudimentary thing compared
+to its shell toolchain, the purpose of this module is only to be a draft for
+possible future elaboration...
 """
 
 gPySubConfigs = {
-    'cmd' : '',
-    'arguments' : '',
     'output' : 'output/HTCondor.out',
     'error' : 'error/HTCondor.err',
     'userLog' : 'log/HTCondor.log',
@@ -43,42 +45,51 @@ class HTCondorPyBackend(lamia.backend.interface.BatchBackend):
     The batch-processing back-end implementation for HTCondor.
     Relies on third-party Pythonic bindings for HTCondor facility (module
     `htcondor')
+
+    This way does not support dependency management making its practical
+    meaning neglegible. Kept for possible future usage.
     """
     def backend_type():
         return 'HTCondor'
 
     def __init__(self, config):
+        L = logging.getLogger(__name__)
         super().__init__(config)
+        if 'scheddAd' in self.cfg:
+            self._schedd = htcondor.Schedd()
+            L.info( 'Instantiated default schedd handler: %s'%str(self._schedd) )
+        else:
+            self._schedd = htcondor.Schedd(self.cfg['scheddAd'])
+            L.info( 'Instantiated schedd handler: %s with classAd'
+                    ' retrieved from config.'%str(self._schedd) )
 
-    def submit(self, jobName,
-                     cmd=None,
-                     stdout=None,
-                     stderr=None,
-                     timeout=30,
-                     backendArguments={},
-                     popenKwargs={} ):
+    def submit( self, jobName
+                    , cmd=None
+                    , stdout=None, stderr=None
+                    , timeout=30
+                    , backendArguments={}
+                    , popenKwargs={} ):
         """
-        Submit the job to HTCondor
-        Will forward `cmd' as a string within the `subprocess.Popen'
+        Submits the job to processing using HTCondor Python bindings for
+        ClassAds (no interim submission files).
         """
         L = logging.getLogger(__name__)
-        # building ClassAd
+        assert(cmd)
+        if type(cmd) is str:
+            cmd = [cmd]
         if (type(cmd) is not list):
             raise TypeError( "First argument is expected to be a list' \
-                            ' not a %s"%type(cmd) )
-        if stdout:
-            gPySubConfigs.update({'output' : stdout})
-        if stderr:
-            gPySubConfigs.update({'error' : stderr})
-        gPySubConfigs['cmd'] = cmd[0]
-        gPySubConfigs['arguments'] = ' '.join(cmd[1:])
-        #submitting the job
-        schedd = htcondor.Schedd()
-        schedd.submit(gPySubConfigs)
-        L.debug("Command is %s"%(' '.join(cmd)))
-        # TODO: to take configs from the config directory, not from local
-        # TODO: to build the properties to return
-        return {'jID':'1', 'queue':'1'}
+                            ' not a %s"%type(cmd).__name__ )
+        classAd = copy.deepcopy(self.cfg['classAds.bsub'])
+        classAd['cmd'] = cmd[0]
+        if len(cmd) > 1:
+            classAd['arguments'] = ' '.join(cmd[1:])
+        return self._schedd.submit(classAd), None
+        # OR:
+        #sub = htcondor.Submit(classAd)
+        #with self._schedd.transaction() as txn:
+        #    clusterID = sub.queue(txn)
+        #return clusterID, None
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass

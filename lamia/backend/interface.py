@@ -73,9 +73,12 @@ class BatchBackend(abc.ABC):
     The only demand for these method is compatibility of jID. It has be an
     instance of arbitrary type that must be returned by submit() and understood
     by kill.../wait.../get_status/.../etc. methods.
-    TODO: support for job arrays.
     """
     def __init__( self, config ):
+        """
+        Ctr accepts a config object of form sutable for
+        lamia.core.configuration.Configuration instance.
+        """
         L = logging.getLogger(__name__)
         self.cfg = lamia.core.configuration.Stack()
         self.cfg.push(lamia.core.configuration.Configuration(config))
@@ -90,7 +93,7 @@ class BatchBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def submit(self, jobName
+    def submit(self, jobName, nProcs=1
                    , cmd=None
                    , stdout=None, stderr=None
                    , timeout=30
@@ -99,17 +102,27 @@ class BatchBackend(abc.ABC):
         """
         Shall submit job and, upon successful submission, return the "job
         submitted properties" object.
-        The `cmd' must be either a list of shell command arguments to submit,
+        * The `cmd' must be either a list of shell command arguments to submit,
         or the entire command, or None/'-' indicating that input from stdin
         has to be retrieved.
-        The `backendArguments' is an optional parameters usually provided to
+        * The `nProcs' denotes a set of homogeneous jobs. The back-end may or
+        may not imply this term directly as "arrays", but it is esentially the
+        same for most facilites.
+        * The `backendArguments' is an optional parameters usually provided to
         submission command, steering the submission process itself. Here, they
-        overrides what is given to ctr.
-        The `popenKwargs' is rarely used dictionary of arguments forwarded to
+        overrides what is given to ctr. Expected to be of `dict' type.
+        * The `popenKwargs' is rarely used dictionary of arguments forwarded to
         Python's subprocess.Popen() ctr.
         Returns the two objects: a job ID and the dictionary of arbitrary
         properties that user code might found useful (but we do not demand it
         be of some certain form).
+        * The `stdour'/`stderr' arguments will undergo the string interpolation
+        prior the actual submission with backend-specific special placeholders
+        substitution. The list of common interpolation variables are:
+            - {jIndex} -- `%I' for LSF, `$(Process)' for HTCondor
+            - {jID} -- `%J' for LSF, `$(Cluster).$(Process)' for HTCondor
+        Note, that for `nProcs' != 1 your submission must provide at least one
+        of this macros within stderr/stdout.
         """
         pass
 
@@ -271,11 +284,11 @@ class BatchSubmittingTask( BatchTask
     }
 
     def submit( self, fwd
-              , jobName=None
+              , jobName=None, nProcs=1
               , stdoutLog=None, stderrLog=None
               , backendArguments={} ):
         try:
-            r = self.backend.submit( jobName
+            r = self.backend.submit( jobName, nProcs=nProcs
                                    , cmd=fwd
                                    , stdout=stdoutLog, stderr=stderrLog
                                    , backendArguments=backendArguments )

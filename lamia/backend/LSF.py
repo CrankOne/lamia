@@ -45,8 +45,8 @@ gLSFJobStates = {
 gDefaults = {
         # Where to find executables responsible for various tasks
         'execs' : {
-            'bsub' : 'bsub',
-            'bjobs' : 'bjobs'
+            'bsub' : '/usr/bin/bsub',
+            'bjobs' : '/usr/bin/bjobs'
         },
         # LSF-specific job submission settings
         'bsub'  : {},
@@ -103,6 +103,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
 
     def submit( self, jobName
                     , cmd=None
+                    , nProcs=1
                     , stdout=None, stderr=None
                     , timeout=30
                     , backendArguments={}
@@ -127,9 +128,10 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                 cmd_.append(str(v))
         if 'q' not in bsubArgs.keys():
             raise RuntimeError('LSF queue is not specified')  # TODO: warning
-        cmd_.append( '-J%s'%jobName )
-        cmd_.append( '-oo%s'%stdout )
-        cmd_.append( '-eo%s'%stderr )
+        lsfMacros = { 'jIndex' : '%I', 'jID' : '%J' }
+        cmd_.append( '-J%s'%(jobName if 1 == nProcs else "%s[1,%d]"%(jobName, nProcs)) )
+        cmd_.append( '-oo%s'%stdout.format(lsfMacros) )
+        cmd_.append( '-eo%s'%stderr.format(lsfMacros) )
         #- Append the command:
         stdinCmds = None
         if type(cmd) is None \
@@ -242,9 +244,6 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         """
         L = logging.getLogger(__name__)
         nAttempt = 0
-        # Kludge: here we waiting 5 secs due to LSF feature of not showing the
-        # job in bjobs list immediately after submission.
-        #time.sleep(5) # TODO: is it true?
         while True:
             nAttempt += 1
             jLst = self.get_status( jID, popenKwargs=popenKwargs )
