@@ -115,8 +115,8 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         htcndrMacros = { 'jIndex' : '$(Process)'
                        , 'jID' : '$(Cluster).$(Process)' }
         cad.update({
-            "output" : stdout.format(htcndrMacros),
-            "error" : stderr.format(htcndrMacros),
+            "output" : stdout.format(**htcndrMacros),
+            "error" : stderr.format(**htcndrMacros),
             "userLog" : uLogFilePath
         })
         if 'classAd' in backendArguments:
