@@ -119,18 +119,21 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         })
         if 'classAd' in backendArguments:
             cad.update( backendArguments['classAd'] )
+        htcondorJobIndexVal = 'SINGLE' if 1 == nProcs else '$(Process)'
         if 'environment' in cad:
             assert(type(cad['environment'] is dict))
-            htcondorJobIndexVal = 'SINGLE' if 1 == nProcs else '$(Process)'
             if 'HTCONDOR_JOBINDEX' in cad['environment']:
                 L.error( "The `HTCONDOR_JOBINDEX' specified for the"
                         " nevironment will be overriden"
                         " with \"%s\"."%htcondorJobIndexVal )
-            cad['HTCONDOR_JOBINDEX'] = htcondorJobIndexVal
-            # NOTE: we do not escape the double quotes here (acc. to
-            # `man condor_submit' it has been done with double-quotes ("")),
-            # making this to be a user responsibility.
-            s = '"%s"'%(' '.join(['%s=%s'%(k, v) for k, v in cad['environment'].items()]))
+        else:
+            cad['environment'] = {}
+        cad['environment']['HTCONDOR_JOBINDEX'] = htcondorJobIndexVal
+        # NOTE: we do not escape the double quotes here (acc. to
+        # `man condor_submit' it has been done with double-quotes ("")),
+        # making this to be a user responsibility.
+        s = '"%s"'%(' '.join(['%s=%s'%(k, v) for k, v in cad['environment'].items()]))
+        cad['environment'] = s
         with open(submissionFilePath, 'w') as f:
             for k, v in cad.items():
                 if type(v) is list \
