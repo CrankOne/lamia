@@ -42,8 +42,8 @@ gDefaults = {
         'classAds' : {
             'submit' : {
                 'universe' : 'vanilla',
-                'should_transfer_files' : 'YES',
-                'when_to_transfer_output' : 'ON_EXIT'
+                'should_transfer_files' : 'NO'
+                #'when_to_transfer_output' : 'ON_EXIT'
             }
         }
     }
