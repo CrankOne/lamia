@@ -56,6 +56,63 @@ gDefaults = {
                   , 'wX' : None }
     }
 
+class LSFSubmission(lamia.backend.interface.Submission):
+    def __init__(self, jobName
+                     , cmd=None
+                     , nProcs=1
+                     , stdout=None, stderr=None
+                     , timeout=30
+                     , backendArguments={}
+                     , popenKwargs={} ):
+        """
+        Will forward `cmd' as a string or a tuple within the `subprocess.Popen'
+        call treating its return code and stdout/stderr.
+        Upon successful submission will return job `ID' and `queue' information
+        about job just being submitted.
+        Will raise `LSFSubmissionFailure' on failure.
+        """
+        L = logging.getLogger(__name__)
+        super().__init__( jobName )
+        # Form the full bsub tuple:
+        #- Prepare the bsub arguments:
+        self._cmdArgs = [self.cfg['execs.bsub']]
+        bsubArgs = copy.deepcopy(self.cfg['bsub'])
+        bsubArgs.update(backendArguments)
+        # Form the LSF submission arguments
+        for k, v in bsubArgs.items():
+            self._cmdArgs.append( '-%s'%k )
+            if v is not None:
+                self._cmdArgs.append(str(v))
+        if 'q' not in bsubArgs.keys():
+            raise RuntimeError('LSF queue is not specified')  # TODO: warning
+        lsfMacros = { 'jIndex' : '%I', 'jID' : '%J' }
+        self._cmdArgs.append( '-J%s'%(jobName if 1 == nProcs else "%s[1,%d]"%(jobName, nProcs)) )
+        self._cmdArgs.append( '-oo%s'%stdout.format(lsfMacros) )
+        self._cmdArgs.append( '-eo%s'%stderr.format(lsfMacros) )
+        #- Append the command:
+        self._stdinCmds = None
+        if type(cmd) is None \
+        or (type(cmd) is str and '-' == cmd) \
+        or not cmd:
+            self._stdinCmds = ''
+            # Read from stdin
+            for line in sys.stdin:
+                self._stdinCmds += line
+            L.debug( "Stdin input: %s"%self._stdinCmds )
+            if not self._stdinCmds:
+                raise ValueError( "Empty stdin input given for job submission." )
+        elif type(cmd) is str:
+            self._cmdArgs += shlex.split(cmd)
+        elif type(self._cmdArgs) is not list:
+            raise TypeError( "First argument for submit is expected to be' \
+                    ' either str or list. Got %s."%type(cmd) )
+        if cmd:
+            self._cmdArgs += copy.deepcopy(cmd)
+        # Sets the default popen's kwargs and override it by user's kwargs
+        self.pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
+                                 , 'stderr' : subprocess.PIPE
+                                 , 'universal_newlines' : True })
+        self.pkw.update(popenKwargs)
 
 class LSFBackend(lamia.backend.interface.BatchBackend):
     """
@@ -101,63 +158,17 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         L.debug( 'bjobs output of %d entries treated'%len(jobsList) )
         return jobsList
 
-    def submit( self, jobName
-                    , cmd=None
-                    , nProcs=1
-                    , stdout=None, stderr=None
-                    , timeout=30
-                    , backendArguments={}
-                    , popenKwargs={} ):
+    def _submit(self, cmd_       # command-line invocation
+                    , stdinCmds  # stdin, if given, otherwise -- None
+                    , pkw        # popen() keyword arguments
+                    ):
         """
-        Will forward `cmd' as a string or a tuple within the `subprocess.Popen'
-        call treating its return code and stdout/stderr.
-        Upon successful submission will return job `ID' and `queue' information
-        about job just being submitted.
-        Will raise `LSFSubmissionFailure' on failure.
+        Internal method: performs shell invocation of submission util. Doesn't
+        take care of dependencies, command line args, etc: just forwards it's
+        signature to shell.
         """
-        L = logging.getLogger(__name__)
-        # Form the full bsub tuple:
-        #- Prepare the bsub arguments:
-        cmd_ = [self.cfg['execs.bsub']]
-        bsubArgs = copy.deepcopy(self.cfg['bsub'])
-        bsubArgs.update(backendArguments)
-        # Form the LSF submission arguments
-        for k, v in bsubArgs.items():
-            cmd_.append( '-%s'%k )
-            if v is not None:
-                cmd_.append(str(v))
-        if 'q' not in bsubArgs.keys():
-            raise RuntimeError('LSF queue is not specified')  # TODO: warning
-        lsfMacros = { 'jIndex' : '%I', 'jID' : '%J' }
-        cmd_.append( '-J%s'%(jobName if 1 == nProcs else "%s[1,%d]"%(jobName, nProcs)) )
-        cmd_.append( '-oo%s'%stdout.format(lsfMacros) )
-        cmd_.append( '-eo%s'%stderr.format(lsfMacros) )
-        #- Append the command:
-        stdinCmds = None
-        if type(cmd) is None \
-        or (type(cmd) is str and '-' == cmd) \
-        or not cmd:
-            stdinCmds = ''
-            # Read from stdin
-            for line in sys.stdin:
-                stdinCmds += line
-            L.debug( "Stdin input: %s"%stdinCmds )
-            if not stdinCmds:
-                raise ValueError( "Empty stdin input given for job submission." )
-        elif type(cmd) is str:
-            cmd_ += shlex.split(cmd)
-        elif type(cmd_) is not list:
-            raise TypeError( "First argument for submit is expected to be' \
-                    ' either str or list. Got %s."%type(cmd) )
-        if cmd:
-            cmd_ += copy.deepcopy(cmd)
         # Submit the job and check its result.
         try:
-            # Sets the default popen's kwargs and override it by user's kwargs
-            pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
-                                , 'stderr' : subprocess.PIPE
-                                , 'universal_newlines' : True })
-            pkw.update(popenKwargs)
             submJob = subprocess.Popen( cmd_, **pkw )
             L.debug('Performing subprocess invocation:')
             L.debug("  $ %s"%(' '.join(cmd_) if stdinCmds is None else '<stdin>' ))
@@ -180,6 +191,13 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                            , 'rc' : rc })
         L.info( 'LSF job submitted: {queue}/{jID}'.format(**m.groupdict()) )
         return int(m.groupdict()['jID']), dict(m.groupdict())
+
+    def queue( self, *args, **kwargs ):
+        return LSFSubmission(*args, **kwargs)
+
+    def dispatch_jobs(self, j):
+        assert( isinstance(j, LSFSubmission) )
+        return self._submit( j._cmdArgs, self.stdinCmds, self.pkw )
 
     def list_jobs(self, timeout=30, backendArguments={}, popenKwargs={}):
         L = logging.getLogger(__name__)

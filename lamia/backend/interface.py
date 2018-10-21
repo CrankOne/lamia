@@ -19,7 +19,7 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import abc, os, logging, sys, copy, argparse, re
+import abc, os, logging, sys, copy, argparse, re, enum
 import lamia.core.configuration \
      , lamia.logging \
      , lamia.core.task
@@ -65,6 +65,19 @@ class JListFailure(BackendCommandError):
 #    'jobStdout' : '/tmp/%(taskName)s.%(sessionTag)s.%(backendType)s.%(jobName)s.%(logType)s.txt'
 #}
 
+class Submission(abc.ABC):
+    def __init__( self, jobName ):
+        self._deps = []
+        self._jobName = jobName
+
+    def add_dep( self, dep, props=None ):
+        assert( isinstance( dep, Submission ) )
+        self._deps.append( (dep, props) )
+
+    @property
+    def deps(self):
+        return self._deps
+
 class BatchBackend(abc.ABC):
     """
     Defines basic properties system for every batch-processing backend.
@@ -93,15 +106,16 @@ class BatchBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def submit(self, jobName, nProcs=1
-                   , cmd=None
-                   , stdout=None, stderr=None
-                   , timeout=30
-                   , backendArguments={}
-                   , popenKwargs={} ):
+    def queue(self, jobName, nProcs=1
+                  , cmd=None
+                  , stdout=None, stderr=None
+                  , timeout=30
+                  , backendArguments={}
+                  , popenKwargs={} ):
         """
-        Shall submit job and, upon successful submission, return the "job
-        submitted properties" object.
+        Shall compose and return the `Submission' subclass instance. Most
+        frequently, just forwards arguments to the particular Submission
+        subclass constructor.
         * The `cmd' must be either a list of shell command arguments to submit,
         or the entire command, or None/'-' indicating that input from stdin
         has to be retrieved.
@@ -123,6 +137,20 @@ class BatchBackend(abc.ABC):
             - {jID} -- `%J' for LSF, `$(Cluster).$(Process)' for HTCondor
         Note, that for `nProcs' != 1 your submission must provide at least one
         of this macros within stderr/stdout.
+        * If `noDispatch' is given, the job shall not be actually submitted,
+        but rather put into some the internal queue. In this case, the returned
+        must have a special meaning, allowing subsequent `submit()' invocations
+        to refer this job(s) as a dependency.
+        """
+        pass
+
+    @abc.abstractmethod
+    def dispatch_jobs(self, submitObjs ):
+        """
+        Performs an actual job submission, based on `Submission' subclass
+        instance.
+        Takes care of all the dependencies passed within submission object
+        (thus, the topmost submission object(s) have to be passed in).
         """
         pass
 
@@ -283,25 +311,25 @@ class BatchSubmittingTask( BatchTask
         'result_format' : "jID={jID}"
     }
 
-    def submit( self, fwd
-              , jobName=None, nProcs=1
-              , stdoutLog=None, stderrLog=None
-              , backendArguments={} ):
-        try:
-            r = self.backend.submit( jobName, nProcs=nProcs
-                                   , cmd=fwd
-                                   , stdout=stdoutLog, stderr=stderrLog
-                                   , backendArguments=backendArguments )
-        except JListFailure as e:
-            sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
-            if not e.exception:
-                L.error( '<submission command stdout>:\n' )
-                L.error( e.output['stdout'].decode('ascii') )
-                L.error( '<submission command stderr>:\n' )
-                L.error( e.output['stderr'].decode('ascii') )
-            else:
-                L.exception( e.exception )
-        return r
+    #def submit( self, fwd
+    #          , jobName=None, nProcs=1
+    #          , stdoutLog=None, stderrLog=None
+    #          , backendArguments={} ):
+    #    try:
+    #        r = self.backend.queue( jobName, nProcs=nProcs
+    #                               , cmd=fwd
+    #                               , stdout=stdoutLog, stderr=stderrLog
+    #                               , backendArguments=backendArguments )
+    #    except JListFailure as e:
+    #        sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
+    #        if not e.exception:
+    #            L.error( '<submission command stdout>:\n' )
+    #            L.error( e.output['stdout'].decode('ascii') )
+    #            L.error( '<submission command stderr>:\n' )
+    #            L.error( e.output['stderr'].decode('ascii') )
+    #        else:
+    #            L.exception( e.exception )
+    #    return r
 
     def _main( self
              , fwd=[]
@@ -317,10 +345,11 @@ class BatchSubmittingTask( BatchTask
         if not jobName:
             self.argParser.error( 'Job name is not set.' )
         backendArguments = backend_specific_args( backendArguments, backend )
-        r = self.submit( fwd, jobName=jobName
+        jq = self.queue( fwd, jobName=jobName
                        , stdoutLog=stdoutLog, stderrLog=stderrLog
                        , backendArguments=backendArguments )
-        sys.stdout.write( resultFormat.format(**r) )
+        self.dispatch_jobs( jq )
+        sys.stdout.write( resultFormat.format(**r.fields) )
         return 0
 
 class BatchListingTask( BatchTask
