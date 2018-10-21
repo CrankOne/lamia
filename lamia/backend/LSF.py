@@ -129,9 +129,9 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         if 'q' not in bsubArgs.keys():
             raise RuntimeError('LSF queue is not specified')  # TODO: warning
         lsfMacros = { 'jIndex' : '%I', 'jID' : '%J' }
-        cmd_.append( '-J%s'%(jobName if 1 == nProcs else "%s[1,%d]"%(jobName, nProcs)) )
-        cmd_.append( '-oo%s'%stdout.format(lsfMacros) )
-        cmd_.append( '-eo%s'%stderr.format(lsfMacros) )
+        cmd_.append( '-J%s'%(jobName if 1 == nProcs else "%s[1-%d]"%(jobName, nProcs)) )
+        cmd_.append( '-oo%s'%stdout.format(**lsfMacros) )
+        cmd_.append( '-eo%s'%stderr.format(**lsfMacros) )
         #- Append the command:
         stdinCmds = None
         if type(cmd) is None \
