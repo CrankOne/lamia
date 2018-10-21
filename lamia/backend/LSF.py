@@ -197,6 +197,8 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
 
     def dispatch_jobs(self, j):
         assert( isinstance(j, LSFSubmission) )
+        if j.deps:
+            raise NotImplementedError("Dependencies is not yet supported.")  # TODO
         return self._submit( j._cmdArgs, self.stdinCmds, self.pkw )
 
     def list_jobs(self, timeout=30, backendArguments={}, popenKwargs={}):
