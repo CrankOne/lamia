@@ -55,16 +55,6 @@ class JListFailure(BackendCommandError):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-#{
-#    # An arbitrary expression to uniqely identify the current
-#    # session
-#    'sessionTag' : os.environ.get('TTAG', '%x'%int(datetime.datetime.now().timestamp())),
-#    'taskName' : taskName,
-#    # The pattern for log files path. All the self.cfg object will
-#    # be used for formatting + the `logType'=(out|err) strings.
-#    'jobStdout' : '/tmp/%(taskName)s.%(sessionTag)s.%(backendType)s.%(jobName)s.%(logType)s.txt'
-#}
-
 class Submission(abc.ABC):
     """
     Abstract interface for submission job data.

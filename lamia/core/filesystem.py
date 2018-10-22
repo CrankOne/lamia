@@ -76,7 +76,8 @@ def dict_product(**kwargs):
         {one:1, two:4}
         {one:2, two:3}
         {one:2, two:4}
-    Order is arbitrary.
+    Order is not guaranteed.
+    TODO: support for nested dicts/sequences.
     """
     L = logging.getLogger(__name__)
     scalars = {}
@@ -84,8 +85,15 @@ def dict_product(**kwargs):
     for k, v in kwargs.items():
         if _is_seq(v):
             sequences[k] = v
-        else:
+            if any( map( lambda x: type(x) not in (bool, int, float, str)
+                       , v )
+                  ):
+                raise NotImplementedError("Nested sequences aren't"
+                        " yet supported.")  # TODO
+        elif type(v) in (bool, int, float, str):
             scalars[k] = v
+        else:
+            raise TypeError('%s: %s'%(k, type(v).__name__))
     keys = sequences.keys()
     vals = sequences.values()
     for instance in itertools.product(*vals):
@@ -248,8 +256,8 @@ class Paths( collections.MutableMapping ):
         if dirStruct is None or not dirStruct:
             return None
         if type(dirStruct) is not dict:
-            raise TypeError('At %s: dict expected, got %s.'%('.'.join(path)
-                , type(dirStruct)) )
+            raise TypeError( 'At %s: dict expected, got %s.'%('.'.join(path)
+                           , type(dirStruct)) )
         for k, value in dirStruct.items():
             nm, v = self._new_entry_at(path, k, value)
             ret[nm] = v
@@ -336,10 +344,18 @@ class Paths( collections.MutableMapping ):
         except KeyError:
             # TODO: move to dedicated exception `UnknownAlias' with available
             # keys associated.
-            L.debug('Available aliases: %s'%(', '.join('"%s"'%a for a in self._aliases.keys())))
+            L.error('"%s" not in available aliases: %s'%(
+                ', '.join('"%s"'%a for a in self._aliases.keys())))
             raise
-        return pt.format_map(DictFormatWrapper( dict(kwargs)
-                                              , requireComplete=requireComplete))
+        entries = []
+        relevantKeys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(pt)]))
+        for argsSubset in dict_product(**{k : kwargs[k] for k in relevantKeys}):
+            entries.append( pt.format_map( DictFormatWrapper( dict(argsSubset)
+                                         , requireComplete=requireComplete)) )
+        if 1 == len(entries):
+            return entries[0]
+        else:
+            return entries
 
     def __str__(self):
         """
