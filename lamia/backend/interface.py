@@ -75,9 +75,10 @@ class Submission(abc.ABC):
     these instances will be provided to `dispatch_jobs()' method of the
     back-end instance.
     """
-    def __init__( self, jobName ):
+    def __init__( self, jobName, nProcs ):
         self._deps = []
         self._jobName = jobName
+        self._nProcs = nProcs
 
     def add_dep( self, dep, props=None ):
         assert( isinstance( dep, Submission ) )

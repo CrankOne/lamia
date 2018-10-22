@@ -57,7 +57,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 , cmd=None
                 , nProcs=1
                 , stdout=None, stderr=None
-                , timeout=30
+                , timeout=300
                 , backendArguments={}
                 , popenKwargs={} ):
         assert(jobName)
@@ -65,6 +65,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
         assert(stdout)
         assert(stderr)
         L = logging.getLogger(__name__)
+        super().__init__(jobName, nProcs)
         self.timeout = timeout
         if type(cmd) is None \
         or (type(cmd) is str and '-' == cmd) \
@@ -72,6 +73,8 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
             # TODO: consider to use `-interactive' to `condor_sub'
             raise NotImplementedError("Input from stdin for HTCondor backend"
                     " is not yet implemented.")
+        else:
+            self._stdinCmds = None
         if type(cmd) is str:
             cmd = [cmd]
         elif type(cmd) is not list:
@@ -132,7 +135,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                         ' file.'%type(v).__name__ )
                 f.write( '%s = %s\n'%(k, strV) )
         # Submission command:
-        self.cmd_ = [ self.cfg['execs.condorSubmit'], submissionFilePath
+        self.cmd_ = [ cfg['execs.condorSubmit'], submissionFilePath
                , '-terse'
                , '-batch-name', jobName
                , '-queue', '%d'%nProcs  #< must be last cmd arg!
@@ -141,6 +144,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                                  , 'stderr' : subprocess.PIPE
                                  , 'universal_newlines' : True })
         self.pkw.update(popenKwargs)
+        self.classAdDict = cad
 
 class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
     """
@@ -151,11 +155,18 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
     def backend_type():
         return 'HTCondorShell'
 
-    def _submit(self, sm):
+    def _submit( self
+               , cmd_
+               , stdinCmds  # TODO: use
+               , pkw
+               , classAdDict
+               , timeout=300
+               ):
+        L = logging.getLogger(__name__)
         try:
-            L.debug("Supplementary popen() arguments: %s."%str(sm.pkw) )
-            submJob = subprocess.Popen(sm.cmd_, **sm.pkw)
-            out, err = submJob.communicate( timeout=sm.timeout )
+            L.debug("Supplementary popen() arguments: %s."%str(pkw) )
+            submJob = subprocess.Popen(cmd_, **pkw)
+            out, err = submJob.communicate( timeout=timeout )
             rc = submJob.returncode
             L.debug('condor_submit stdout: <<%s>>'%out)
             m = rxJSubmitted.match( out )
@@ -185,7 +196,7 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             ret = { 'jID' : [jidBgn, jidEnd] }
             L.info( 'Multiple HTCondor jobs submitted: %d.%d - %d.%d.'%(
                 jidBgn[0], jidBgn[1], jidEnd[0], jidEnd[1] ) )
-        return ret, cad
+        return ret, classAdDict
 
     def __init__(self, config):
         super().__init__(config)
@@ -207,7 +218,7 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         assert( isinstance(j, HTCondorShellSubmission) )
         if j.deps:
             raise NotImplementedError("Dependencies is not yet supported.")  # TODO
-        return self._submit( j._cmdArgs, j._stdinCmds, j.pkw, timeout=j.timeout )
+        return self._submit( j.cmd_, j._stdinCmds, j.pkw, j.classAdDict, timeout=j.timeout )
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass
@@ -297,7 +308,7 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
                 if report:
                     L.info( " ..waiting for the job(s) to finish for at"
                     " least %d secs more%s."%(intervalSecs
-                    , '' if not nAttempt else '%d/%d'%(nAttempt, nAttempts) ) )
+                    , '' if not nAttempt else ' (%d/%d)'%(nAttempt, nAttempts)))
             elif 0 == rc:
                 L.info( "  ..done waiting for job(s) to finish." )
                 break

@@ -76,7 +76,7 @@ class LSFSubmission(lamia.backend.interface.Submission):
         Will raise `LSFSubmissionFailure' on failure.
         """
         L = logging.getLogger(__name__)
-        super().__init__( jobName )
+        super().__init__( jobName, nProcs )
         # Form the full bsub tuple:
         #- Prepare the bsub arguments:
         self._cmdArgs = [cfg['execs.bsub']]
