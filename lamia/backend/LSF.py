@@ -57,7 +57,7 @@ gDefaults = {
     }
 
 class LSFSubmission(lamia.backend.interface.Submission):
-    def __init__(self, jobName
+    def __init__(self, jobName, cfg
                      , cmd=None
                      , nProcs=1
                      , stdout=None, stderr=None
@@ -75,8 +75,8 @@ class LSFSubmission(lamia.backend.interface.Submission):
         super().__init__( jobName )
         # Form the full bsub tuple:
         #- Prepare the bsub arguments:
-        self._cmdArgs = [self.cfg['execs.bsub']]
-        bsubArgs = copy.deepcopy(self.cfg['bsub'])
+        self._cmdArgs = [cfg['execs.bsub']]
+        bsubArgs = copy.deepcopy(cfg['bsub'])
         bsubArgs.update(backendArguments)
         # Form the LSF submission arguments
         for k, v in bsubArgs.items():
@@ -113,6 +113,7 @@ class LSFSubmission(lamia.backend.interface.Submission):
                                  , 'stderr' : subprocess.PIPE
                                  , 'universal_newlines' : True })
         self.pkw.update(popenKwargs)
+        self.timeout = timeout
 
 class LSFBackend(lamia.backend.interface.BatchBackend):
     """
@@ -161,12 +162,14 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
     def _submit(self, cmd_       # command-line invocation
                     , stdinCmds  # stdin, if given, otherwise -- None
                     , pkw        # popen() keyword arguments
+                    , timeout=60
                     ):
         """
         Internal method: performs shell invocation of submission util. Doesn't
         take care of dependencies, command line args, etc: just forwards it's
         signature to shell.
         """
+        L = logging.getLogger(__name__)
         # Submit the job and check its result.
         try:
             submJob = subprocess.Popen( cmd_, **pkw )
@@ -190,16 +193,16 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
                            , 'stderr' : err
                            , 'rc' : rc })
         L.info( 'LSF job submitted: {queue}/{jID}'.format(**m.groupdict()) )
-        return int(m.groupdict()['jID']), dict(m.groupdict())
+        return dict(m.groupdict())
 
-    def queue( self, *args, **kwargs ):
-        return LSFSubmission(*args, **kwargs)
+    def queue( self, jobName, **kwargs ):
+        return LSFSubmission(jobName, self.cfg, **kwargs)
 
     def dispatch_jobs(self, j):
         assert( isinstance(j, LSFSubmission) )
         if j.deps:
             raise NotImplementedError("Dependencies is not yet supported.")  # TODO
-        return self._submit( j._cmdArgs, self.stdinCmds, self.pkw )
+        return self._submit( j._cmdArgs, j._stdinCmds, j.pkw, timeout=j.timeout )
 
     def list_jobs(self, timeout=30, backendArguments={}, popenKwargs={}):
         L = logging.getLogger(__name__)
@@ -219,12 +222,12 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
         return jLst
 
-    def get_status( self, jID
+    def get_status( self, subObj
                   , backendArguments={}
                   , timeout=30
                   , popenKwargs={}):
         """
-        By given `jID' (of possibly arbitrary type), shall return "active job
+        By given `subObj' (of possibly arbitrary type), shall return "active job
         properties object".
         """
         L = logging.getLogger(__name__)
@@ -238,7 +241,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
-        cmd_.append( '%d'%jID )
+        cmd_.append( '{jID}'.format(**subObj) )
         jLst = self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
         # Repeat, to obtain jobs what are recently done
         #cmd_.append( '-d' )
@@ -252,7 +255,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         """
         pass
 
-    def wait_for_job( self, jID
+    def wait_for_job( self, subObj
                     , nAttempts=0
                     , intervalSecs=60
                     , popenKwargs={}
@@ -266,7 +269,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         nAttempt = 0
         while True:
             nAttempt += 1
-            jLst = self.get_status( jID, popenKwargs=popenKwargs )
+            jLst = self.get_status( subObj, popenKwargs=popenKwargs )
             if len(jLst) == 0 or (nAttempts != 0 and nAttempt >= nAttempts):
                 L.warning("Exit waiting loop due to end or number"
                     " of attempts exceeded or none job with such ID"
@@ -277,11 +280,11 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             jStCode = gLSFJobStates.get(jState, 0x2)
             if 0x2 & jStCode:
                 if report:
-                    L.info( 'Job %d has "%s" status, waiting%s.'%(jID, jState,
+                    L.info( 'Job %s has "%s" status, waiting%s.'%(subObj['jID'], jState,
                         ' %d/%d'%(nAttempt, nAttempts) if nAttempts else '' ) )
                 time.sleep(intervalSecs)
             else:
-                L.info( 'Done waiting for LSF job %d, state: "%s"'%(jID, jState) )
+                L.info( 'Done waiting for LSF job %s, state: "%s"'%(subObj['jID'], jState) )
                 break  # Exit due to `done' probably
             if 0x1 & jStCode:
                 L.error("LSF job %d has erroneous/unknown status: \"%s\"."%jState )
