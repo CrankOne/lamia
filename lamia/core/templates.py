@@ -265,13 +265,12 @@ class Templates(object):
         (usually a lamia.core.configuration.Stack object).
         """
         L = logging.getLogger('lamia.templates')
-        if not isinstance(fs, FS.Paths ):
-            raise TypeError( "lamia.core.filesystem.Paths object expected"
-                    "as TPTH interpolator"
-                    ", got %s."%type(fs) )
+        if not issubclass( type(fs), FS.Paths ):
+            raise TypeError( "lamia.core.filesystem.Paths subclass instance"
+                    " expected as interpolator, got %s."%type(fs) )
         if 'default' in renderers.keys():
             # Puzzling message. Means that hereafter we use foreign template
-            # renderer insted of current instance when it is reffered to
+            # renderer instead of current instance when it is reffered to
             # "default".
             L.warning( 'Template renderer "default" will be overriden when'
                     ' deploying FS structure.' )

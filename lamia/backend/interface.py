@@ -284,14 +284,16 @@ class BatchTask( lamia.core.task.Task
     """
     __commonParameters = gCommonParameters
 
+    def setup_backend( self, backEndName
+                           , backEndCfg=None ):
+        self._backend = instantiate_backend( backEndName
+                                           , backEndCfg )
+
     @property
     def backend(self):
-        if not hasattr(self, '_backendName') \
-        or not hasattr(self, '_backendConfig'):
-            raise AssertionError("Backend attributes are not initialized yet.")
         if not hasattr(self, '_backend'):
-            self._backend = instantiate_backend( self._backendName
-                                               , self._backendConfig )
+            raise RuntimeError('Batch back-end is not initialized.'
+                    ' Use setup_backend() method to instantiate one.')
         return self._backend
 
 class BatchSubmittingTask( BatchTask
@@ -351,7 +353,7 @@ class BatchSubmittingTask( BatchTask
              , backendArguments={}
              , resultFormat='' ):
         L = logging.getLogger(__name__)
-        self._backendName, self._backendConfig = backend, backendConfig
+        self.setup_backend( backend, backendConfig )
         if not fwd:
             self.argParser.error( 'Nothing to submit.' )
         if not jobName:
@@ -398,7 +400,7 @@ class BatchListingTask( BatchTask
         Defines argument parser object for possible future usage.
         """
         L = logging.getLogger(__name__)
-        self._backendName, self._backendConfig = backend, backendConfig
+        self.setup_backend( backend, backendConfig )
         r = self.list_jobs(backendArguments=backend_specific_args( backendArguments, backend ))
         sys.stdout.write( resultFormat.format(**r) )
         return 0

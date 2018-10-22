@@ -404,11 +404,11 @@ class Paths( collections.MutableMapping ):
                     # The pathCtx will be available within the
                     # template as well.
                     context = copy.deepcopy( tContext )
-                    if 'p' in context.keys():
-                        L.warning( 'The "p" is already in'
+                    if '__p' in context.keys():
+                        L.warning( 'The "__p" is already in'
                                 ' template\'s context. Preserving it.' )
                     else:
-                        context['p'] = pathCtx
+                        context['__p'] = pathCtx
                     if 'paths' in context.keys():
                         L.warning( 'The "paths" is already in'
                                 ' template\'s context. Preserving it.' )

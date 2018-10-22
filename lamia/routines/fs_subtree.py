@@ -180,6 +180,8 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         super().setup_rendering( templatesDirs
                                , contexts
                                , definitions=definitions)
+        # We append interpolators set here to support path context
+        # ...
 
     def _main( self
              , outputDir=None

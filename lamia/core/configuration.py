@@ -292,8 +292,8 @@ class Stack(collections.MutableMapping):
         elif initObj:
             self.push(self._obj_to_cfg(initObj))
         else:
-            raise TypeError('Unexpected type given for configuration stack'
-                    ' initialization: %s.'%type(initObj) )
+            raise TypeError('Unexpected type/empty dict given for'
+                    ' configuration stack initialization: %s.'%type(initObj) )
 
     class _Deleted(object):
         """

@@ -35,7 +35,7 @@ functionality might be found in the `lamia.routines' module. The former are
 usually relevant to some implications for the staging, therefore involving
 evaluation of corresponding routine.
 """
-import sys, argparse, logging, types
+import sys, argparse, logging, types, functools
 import inflection
 import lamia.logging
 
@@ -163,6 +163,28 @@ def cumulative_class_property_getter(prop):
         return st
     return classmethod(_recurse_getter)
 
+def cumulative_class_property_keys_getter(prop):
+    """
+    Similar to cumulative_class_property_getter() getter-constructor, but
+    returns a flattened set of keys. Relies on the method created by
+    cumulative_class_property_getter().
+    """
+    def _recurse_getter(cls):
+        cpgName = 'get_%s'%prop
+        assert(hasattr(cls, cpgName))  # no cumulative_class_property_getter()!
+        # list of dicts:
+        pl = [d[0] for d in getattr(cls, cpgName)()]
+        # list of lists:
+        pl = [[k if 'dest' not in v else v['dest'] for k, v in d.items()] for d in pl]
+        # set of strings:
+        pl = functools.reduce( lambda acc, x: acc + x, pl )
+        def _f(nm):
+            shortcut, name = _argparse_par(nm)
+            return name if name else shortcut
+        return set([inflection.camelize(_f(nm), uppercase_first_letter=False) \
+                    for nm in pl])
+    return classmethod(_recurse_getter)
+
 class TaskClass(type):
     """
     A metaclass assembling class from few sources. Expects the following
@@ -201,6 +223,8 @@ class TaskClass(type):
                 clsname))
         for pN in cumulativeGetters:
             attributedict['get_%s'%pN] = cumulative_class_property_getter( pN )
+            attributedict['get_%s_names'%pN] \
+                    = cumulative_class_property_keys_getter(pN)
         attributedict['get_exec_parameters'] = classmethod( lambda cls :
                 getattr(cls, '_%s__execParameters'%cls.__name__) )
         # Produce class object

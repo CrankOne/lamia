@@ -100,7 +100,8 @@ class RenderTemplateTask( lamia.core.task.Task
         """
         self.rStk = lamia.core.configuration.compose_stack(contexts, definitions)
         self.tli = lamia.core.interpolation.Processor()
-        self.tli['PATH'] = os.path.realpath
+        #self.tli['REAL_PATH'] = os.path.realpath
+        #self.tli['PATH_VAR'] = lambda nm: str(self.pStk[nm])
         self.fltrs = { 'abspath'    : lamia.core.templates.AbsPathFilter(os.getcwd())
                      , 'commonpath' : lamia.core.templates.CommonPathFilter(os.getcwd()) }
         self.t = lamia.core.templates.Templates( templatesDirs
