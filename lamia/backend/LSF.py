@@ -57,6 +57,10 @@ gDefaults = {
     }
 
 class LSFSubmission(lamia.backend.interface.Submission):
+    """
+    An LSF job submission representation.
+    Ctr makes everything ready for direct command-shell `bsub' invocation.
+    """
     def __init__(self, jobName, cfg
                      , cmd=None
                      , nProcs=1

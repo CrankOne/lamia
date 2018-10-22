@@ -48,44 +48,30 @@ gDefaults = {
         }
     }
 
-class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
+class HTCondorShellSubmission(lamia.backend.interface.Submission):
     """
-    The batch-processing back-end implementation for HTCondor.
-    Relies on manually-written ClassAd files and shell utilities.
+    An HTCondor job submission representation.
+    Ctr composes arguments for `condor_submit' shell invocation.
     """
-
-    def backend_type():
-        return 'HTCondorShell'
-
-    def __init__(self, config):
-        super().__init__(config)
-
-    def submit(self, jobName,
-                     cmd=None,
-                     nProcs=1,
-                     stdout=None, stderr=None,
-                     timeout=30,
-                     backendArguments={},
-                     popenKwargs={} ):
-        """
-        Submit the job to HTCondor
-        Will forward `cmd' as a string within the `subprocess.Popen'.
-
-        Important `backendArguments' entry is a "submissionFile" that shall denote a
-        file where corresponding submission classAd will be generated. If it
-        is not provided, the first `cmd' entry will be considered as a filename
-        to which we append a `.sub' postfix and use resulting path for
-        generating a submission file.
-        """
+    def __init__( self, jobName, cfg
+                , cmd=None
+                , nProcs=1
+                , stdout=None, stderr=None
+                , timeout=30
+                , backendArguments={}
+                , popenKwargs={} ):
+        assert(jobName)
         assert(nProcs)
         assert(stdout)
         assert(stderr)
         L = logging.getLogger(__name__)
+        self.timeout = timeout
         if type(cmd) is None \
         or (type(cmd) is str and '-' == cmd) \
         or not cmd:
             # TODO: consider to use `-interactive' to `condor_sub'
-            raise NotImplementedError("Input from stdin for HTCondor backend.")
+            raise NotImplementedError("Input from stdin for HTCondor backend"
+                    " is not yet implemented.")
         if type(cmd) is str:
             cmd = [cmd]
         elif type(cmd) is not list:
@@ -96,7 +82,7 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         # submission file ad-hoc seems to be a better alternative since ClassAd
         # syntax is pretty straightforward, even what is concerned `queue'
         # keyword.
-        cad = copy.deepcopy(self.cfg['classAds.submit'])
+        cad = copy.deepcopy(cfg['classAds.submit'])
         cad["executable"] = os.path.abspath(cmd[0])
         if 'submissionFile' not in backendArguments:
             dn, fexec = os.path.split(cad["executable"])
@@ -146,19 +132,30 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
                         ' file.'%type(v).__name__ )
                 f.write( '%s = %s\n'%(k, strV) )
         # Submission command:
-        cmd_ = [ self.cfg['execs.condorSubmit'], submissionFilePath
+        self.cmd_ = [ self.cfg['execs.condorSubmit'], submissionFilePath
                , '-terse'
                , '-batch-name', jobName
                , '-queue', '%d'%nProcs  #< must be last cmd arg!
                ]
+        self.pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
+                                 , 'stderr' : subprocess.PIPE
+                                 , 'universal_newlines' : True })
+        self.pkw.update(popenKwargs)
+
+class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
+    """
+    The batch-processing back-end implementation for HTCondor.
+    Relies on manually-written ClassAd files and shell utilities.
+    """
+
+    def backend_type():
+        return 'HTCondorShell'
+
+    def _submit(self, sm):
         try:
-            pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
-                                , 'stderr' : subprocess.PIPE
-                                , 'universal_newlines' : True })
-            pkw.update(popenKwargs)
-            L.debug("Supplementary popen() arguments: %s."%str(pkw) )
-            submJob = subprocess.Popen(cmd_, **pkw)
-            out, err = submJob.communicate( timeout=timeout )
+            L.debug("Supplementary popen() arguments: %s."%str(sm.pkw) )
+            submJob = subprocess.Popen(sm.cmd_, **sm.pkw)
+            out, err = submJob.communicate( timeout=sm.timeout )
             rc = submJob.returncode
             L.debug('condor_submit stdout: <<%s>>'%out)
             m = rxJSubmitted.match( out )
@@ -189,6 +186,28 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             L.info( 'Multiple HTCondor jobs submitted: %d.%d - %d.%d.'%(
                 jidBgn[0], jidBgn[1], jidEnd[0], jidEnd[1] ) )
         return ret, cad
+
+    def __init__(self, config):
+        super().__init__(config)
+
+    def queue(self, jobName, **kwargs):
+        """
+        Submit the job to HTCondor
+        Will forward `cmd' as a string within the `subprocess.Popen'.
+
+        Important `backendArguments' entry is a "submissionFile" that shall denote a
+        file where corresponding submission classAd will be generated. If it
+        is not provided, the first `cmd' entry will be considered as a filename
+        to which we append a `.sub' postfix and use resulting path for
+        generating a submission file.
+        """
+        return HTCondorShellSubmission( jobName, self.cfg, **kwargs )
+
+    def dispatch_jobs(self, j):
+        assert( isinstance(j, HTCondorShellSubmission) )
+        if j.deps:
+            raise NotImplementedError("Dependencies is not yet supported.")  # TODO
+        return self._submit( j._cmdArgs, j._stdinCmds, j.pkw, timeout=j.timeout )
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass

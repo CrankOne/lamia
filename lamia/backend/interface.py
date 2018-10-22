@@ -66,6 +66,15 @@ class JListFailure(BackendCommandError):
 #}
 
 class Submission(abc.ABC):
+    """
+    Abstract interface for submission job data.
+    Certain back-end must subclass this abstract base to specify the
+    dependency-binding mechanism.
+    Subclasses represent a `queue()' result object, allowing the user routines
+    to establish dependency relationships between batch task. Upon completeion,
+    these instances will be provided to `dispatch_jobs()' method of the
+    back-end instance.
+    """
     def __init__( self, jobName ):
         self._deps = []
         self._jobName = jobName
@@ -137,10 +146,12 @@ class BatchBackend(abc.ABC):
             - {jID} -- `%J' for LSF, `$(Cluster).$(Process)' for HTCondor
         Note, that for `nProcs' != 1 your submission must provide at least one
         of this macros within stderr/stdout.
-        * If `noDispatch' is given, the job shall not be actually submitted,
-        but rather put into some the internal queue. In this case, the returned
-        must have a special meaning, allowing subsequent `submit()' invocations
-        to refer this job(s) as a dependency.
+        The job shall not be actually submitted in this method. The method
+        shall rather return an intermediate object (instance of `Submission'
+        subclass) describing the submission job data (optionally, putting into
+        some the internal queue). The returned object have a special meaning,
+        allowing subsequent `dispatch_jobs()' invocations to refer this
+        interim objects as dependencies.
         """
         pass
 
