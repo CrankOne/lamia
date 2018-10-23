@@ -80,7 +80,7 @@ class LSFSubmission(lamia.backend.interface.Submission):
         """
         Overrides default property of `Submission' class
         """
-        if not self.isImplicitArray and 1 == self.nProcs
+        if not self.isImplicitArray and 1 == self.nProcs:
             return super().jobName
         else:
             return '%s[1,%d]'%(super().jobName, self.nProcs*self.nImplicitJobs)
@@ -93,17 +93,15 @@ class LSFSubmission(lamia.backend.interface.Submission):
         Presumes that `self.bsubExec' and `self.bsubArgs' are set.
         """
         L = logging.getLogger(__name__)
-        cmdArgs = [self.bsubExec]
+        c = [self.bsubExec]
         # Form the LSF submission arguments
         for k, v in self.bsubArgs.items():
-            cmdArgs.append( '-%s'%k )
+            c.append( '-%s'%k )
             if v is not None:
-                cmdArgs.append(str(v).format(self.macros()))
-        cmdArgs.append( '-oo%s'%self.stdout.format(**lsfMacros) )
-        cmdArgs.append( '-eo%s'%self.stderr.format(**lsfMacros) )
-        cmdArgs.append( '-J%s'%self.jobName )
+                c.append(str(v).format(self.macros()))
+        c.append( '-J%s'%self.jobName )
         # TODO: dependencies!
-        return cmdArgs + self.bsubTarget
+        return c + self.bsubTarget
 
     def compose_array_script(self, execTarget, tArgs, submissionFilePath=None):
         """
@@ -130,11 +128,11 @@ class LSFSubmission(lamia.backend.interface.Submission):
             f.write("exit $?")
             L.info('LSF array-dispatching script for %d entries'
                     ' has been written in "%s".'%(nEntries, submissionFilePath))
-        os.chmod(submissionFilePath, 0755)
+        os.chmod(submissionFilePath, 0o755)
         return submissionFilePath
 
     def __init__(self, jobName, cfg
-                     , target=None
+                     , cmd=None
                      , nProcs=1
                      , stdout=None, stderr=None
                      , backendArguments={}
@@ -147,17 +145,19 @@ class LSFSubmission(lamia.backend.interface.Submission):
         self.bsubExec = cfg['execs.bsub']
         self.bsubArgs = copy.deepcopy(cfg['bsub'])
         self.bsubArgs.update(backendArguments)
-        for k in ['J', 'oo', 'oe', 'o', 'e']:
-            if k in self.bsubArgs:
-                v = self.bsubArgs.pop(k, None)
+        for k in ['J', 'oo', 'eo', 'o', 'e']:
+            v = self.bsubArgs.pop(k, None)
+            if v:
                 L.warning( '\"-%s\"%s LSF backend argument will be ignored in'
                     ' favor of one defined by LSF'
                     ' back-end.'%(k, '="%s"'%str(v) if v else '') )
         if 'q' not in self.bsubArgs.keys():
             L.warning('LSF queue is not specified.'
                     ' Default LSF queue will be used.')
+        self.bsubArgs['oo'] = stdout
+        self.bsubArgs['eo'] = stderr
         # Initialize basic parent properties:
-        super().__init__( jobName, target, nProcs )
+        super().__init__( jobName, cmd, nProcs )
         # Now, treat the target command in LSF way.
         if self.isImplicitArray:
             self.bsubTarget = \
@@ -168,7 +168,6 @@ class LSFSubmission(lamia.backend.interface.Submission):
         # Sets the default popen's kwargs and override it by user's kwargs
         self.pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
                                  , 'stderr' : subprocess.PIPE
-                                 , 'timeout' : timeut
                                  , 'universal_newlines' : True })
         self.pkw.update(popenKwargs)
 
@@ -182,7 +181,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
     def __init__( self, config ):
         super().__init__(config)
 
-    def _bjobs(self, cmd_, timeout=30, popenKwargs={}):
+    def _bjobs(self, cmd_, popenKwargs={}):
         L = logging.getLogger(__name__)
         # Submit the job and check its result.
         try:
@@ -195,7 +194,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             L.debug('Performing subprocess invocation:')
             L.debug("  $ %s"%(' '.join(cmd_)) )
             L.debug("Supplementary popen() arguments: %s."%str(pkw) )
-            out, err = bjP.communicate( timeout=timeout )
+            out, err = bjP.communicate( timeout=self.cfg['timeouts']['bjobs'] )
             rc = bjP.returncode
             #m = rxJSubmitted.match( out.decode('ascii') )  # TODO
         except Exception as e:
@@ -216,11 +215,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         L.debug( 'bjobs output of %d entries treated'%len(jobsList) )
         return jobsList
 
-    def _submit(self, cmd_       # command-line invocation
-                    , stdinCmds  # stdin, if given, otherwise -- None
-                    , pkw        # popen() keyword arguments
-                    , timeout=60
-                    ):
+    def _submit(self, j):
         """
         Internal method: performs shell invocation of submission util. Doesn't
         take care of dependencies, command line args, etc: just forwards it's
@@ -229,17 +224,19 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
         L = logging.getLogger(__name__)
         # Submit the job and check its result.
         try:
-            submJob = subprocess.Popen( cmd_, **pkw )
+            submJob = subprocess.Popen( j.cmdArgs, **j.pkw )
             L.debug('Performing subprocess invocation:')
-            L.debug("  $ %s"%(' '.join(cmd_) if stdinCmds is None else '<stdin>' ))
-            L.debug("Supplementary popen() arguments: %s."%str(pkw) )
-            if stdinCmds is not None:
+            L.debug("  $ %s"%(' '.join(j.cmdArgs) if not j.stdinTarget else '<stdin>' ))
+            L.debug("Supplementary popen() arguments: %s."%str(j.pkw) )
+            if j.stdinTarget:
                 L.debug( "--- begin of forwarded input from stdin ---" )
-                L.debug( stdinCmds )
+                L.debug( j.stdin )
                 L.debug( "--- end of forwarded input from stdin ---" )
-                out, err = submJob.communicate( input=stdinCmds, timeout=timeout )
+                out, err = submJob.communicate( input=j.stdin
+                            , timeout=self.cfg['timeouts']['bsub'] )
             else:
-                out, err = submJob.communicate( timeout=timeout )
+                out, err = submJob.communicate(
+                            timeout=self.cfg['timeouts']['bsub'] )
             rc = submJob.returncode
             m = rxJSubmitted.match( out ) #.decode('ascii') )
         except Exception as e:
@@ -257,11 +254,11 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
 
     def dispatch_jobs(self, j):
         assert( isinstance(j, LSFSubmission) )
-        if j.deps:
+        if j.dependencies:
             raise NotImplementedError("Dependencies is not yet supported.")  # TODO
-        return self._submit( j._cmdArgs, j._stdinCmds, j.pkw, timeout=j.timeout )
+        return self._submit( j )
 
-    def list_jobs(self, timeout=30, backendArguments={}, popenKwargs={}):
+    def list_jobs(self, backendArguments={}, popenKwargs={}):
         L = logging.getLogger(__name__)
         # Form the full bjobs tuple:
         #- Prepare the bsub arguments:
@@ -273,15 +270,14 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             cmd_.append( '-%s'%k )
             if v is not None:
                 cmd_.append(str(v))
-        jLst = self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        jLst = self._bjobs( cmd_, popenKwargs=popenKwargs )
         # Repeat, to obtain jobs what are recently done
         cmd_.append( '-d' )
-        jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        jLst += self._bjobs( cmd_, popenKwargs=popenKwargs )
         return jLst
 
     def get_status( self, subObj
                   , backendArguments={}
-                  , timeout=30
                   , popenKwargs={}):
         """
         By given `subObj' (of possibly arbitrary type), shall return "active job
@@ -299,7 +295,7 @@ class LSFBackend(lamia.backend.interface.BatchBackend):
             if v is not None:
                 cmd_.append(str(v))
         cmd_.append( '{jID}'.format(**subObj) )
-        jLst = self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )
+        jLst = self._bjobs( cmd_, popenKwargs=popenKwargs )
         # Repeat, to obtain jobs what are recently done
         #cmd_.append( '-d' )
         #jLst += self._bjobs( cmd_, timeout=timeout, popenKwargs=popenKwargs )

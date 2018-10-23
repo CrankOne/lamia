@@ -124,6 +124,10 @@ class Submission(abc.ABC):
     def dependencies(self):
         return self._deps
 
+    @property
+    def nProcs(self):
+        return self._nProcs
+
     def __init__( self, jobName, tCmd, nProcs ):
         self._deps = []
         self._jobName = jobName
@@ -187,7 +191,6 @@ class BatchBackend(abc.ABC):
     def queue(self, jobName, nProcs=1
                   , cmd=None
                   , stdout=None, stderr=None
-                  , timeout=30
                   , backendArguments={}
                   , popenKwargs={} ):
         """
@@ -276,7 +279,7 @@ class BatchBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def list_jobs( self, timeout=30, popenKwargs={} ):
+    def list_jobs( self, popenKwargs={} ):
         """
         Retrieves a list of currently active (or recently done, if appliable)
         jobs. Returns a dictionary, indexed with jobID object.
