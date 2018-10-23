@@ -83,7 +83,10 @@ class LSFSubmission(lamia.backend.interface.Submission):
         if not self.isImplicitArray and 1 == self.nProcs:
             return super().jobName
         else:
-            return '%s[1,%d]'%(super().jobName, self.nProcs*self.nImplicitJobs)
+            n = self.nProcs
+            if hasattr(self, 'nImplicitJobs') and self.nImplicitJobs > 1:
+                n *= self.nImplicitJobs
+            return '%s[1-%d]'%(super().jobName, n)
 
     @property
     def cmdArgs(self):
@@ -98,7 +101,7 @@ class LSFSubmission(lamia.backend.interface.Submission):
         for k, v in self.bsubArgs.items():
             c.append( '-%s'%k )
             if v is not None:
-                c.append(str(v).format(self.macros()))
+                c.append(str(v).format(**self.macros()))
         c.append( '-J%s'%self.jobName )
         # TODO: dependencies!
         return c + self.bsubTarget

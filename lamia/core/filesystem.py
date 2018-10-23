@@ -349,8 +349,8 @@ class Paths( collections.MutableMapping ):
             raise
         entries = []
         relevantKeys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(pt)]))
-        for argsSubset in dict_product(**{k : kwargs[k] for k in relevantKeys}):
-            entries.append( pt.format_map( DictFormatWrapper( dict(argsSubset)
+        for argsSubset in dict_product(**{k : _rv_value(kwargs, k) for k in relevantKeys}):
+            entries.append( pt.format_map( DictFormatWrapper( **dict(argsSubset)
                                          , requireComplete=requireComplete)) )
         if 1 == len(entries):
             return entries[0]
