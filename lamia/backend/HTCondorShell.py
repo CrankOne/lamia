@@ -60,12 +60,9 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 , timeout=300
                 , backendArguments={}
                 , popenKwargs={} ):
-        assert(jobName)
-        assert(nProcs)
         assert(stdout)
         assert(stderr)
         L = logging.getLogger(__name__)
-        super().__init__(jobName, nProcs)
         self.timeout = timeout
         if type(cmd) is None \
         or (type(cmd) is str and '-' == cmd) \
@@ -145,6 +142,9 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                                  , 'universal_newlines' : True })
         self.pkw.update(popenKwargs)
         self.classAdDict = cad
+        assert(nProcs)
+        assert(jobName)
+        super().__init__(jobName, nProcs)
 
 class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
     """

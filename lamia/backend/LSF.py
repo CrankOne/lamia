@@ -56,68 +56,121 @@ gDefaults = {
                   , 'wX' : None }
     }
 
+# A special shell scrpt template performing
+gShell = """
+#!/bin/bash
+args = (
+    %s
+)
+IFS=';' {command} ${args[$LSB_JOBINDEX]}
+"""
+
 class LSFSubmission(lamia.backend.interface.Submission):
     """
     An LSF job submission representation.
     Ctr makes everything ready for direct command-shell `bsub' invocation.
     """
+    @staticmethod
+    def macros():
+        return { 'jIndex' : '%I'
+               , 'jID' : '%J' }
+
+    @property
+    def jobName(self):
+        """
+        Overrides default property of `Submission' class
+        """
+        if not self.isImplicitArray and 1 == self.nProcs
+            return super().jobName
+        else:
+            return '%s[1,%d]'%(super().jobName, self.nProcs*self.nImplicitJobs)
+
+    @property
+    def cmdArgs(self):
+        """
+        Returns the command to be forwarded to the os.exec()/subprocess.popen()
+        calls for actual submission.
+        Presumes that `self.bsubExec' and `self.bsubArgs' are set.
+        """
+        L = logging.getLogger(__name__)
+        cmdArgs = [self.bsubExec]
+        # Form the LSF submission arguments
+        for k, v in self.bsubArgs.items():
+            cmdArgs.append( '-%s'%k )
+            if v is not None:
+                cmdArgs.append(str(v).format(self.macros()))
+        cmdArgs.append( '-oo%s'%self.stdout.format(**lsfMacros) )
+        cmdArgs.append( '-eo%s'%self.stderr.format(**lsfMacros) )
+        cmdArgs.append( '-J%s'%self.jobName )
+        # TODO: dependencies!
+        return cmdArgs + self.bsubTarget
+
+    def compose_array_script(self, execTarget, tArgs, submissionFilePath=None):
+        """
+        There is no means in LSF to express varible arguments within an array.
+        The only thing that differs within the job context is `LSB_JOBINDEX'
+        environment variable, so we hide command-line argument iteration within
+        the encompassing synthesized shell script.
+        """
+        if submissionFilePath is None:
+            dn, fexec = os.path.split(execTarget)
+            submissionFilePath = os.path.join( dn, fexec + '.LSF.sh' )
+        self.nImplicitJobs = 0
+        with open(submissionFilePath) as f:
+            f.write("#!/bin/bash\n")
+            f.write("# Shell script to be processed on LSF batch.\n")
+            f.write("cmdArgs=(\n")
+            for n, argTuple in enumerate(lamia.backend.interface.expand_cmd_args(tArgs)):
+                f.write('  ')
+                f.write( ';'.join(argTuple) )
+                f.write('  # %d\n'%n )
+                self.nImplicitJobs += 1
+            f.write(")\n")
+            f.write("IFS=\"%s\" %s ${cmdArgs[$LSB_JOBINDEX]}")
+            f.write("exit $?")
+            L.info('LSF array-dispatching script for %d entries'
+                    ' has been written in "%s".'%(nEntries, submissionFilePath))
+        os.chmod(submissionFilePath, 0755)
+        return submissionFilePath
+
     def __init__(self, jobName, cfg
-                     , cmd=None
+                     , target=None
                      , nProcs=1
                      , stdout=None, stderr=None
-                     , timeout=30
                      , backendArguments={}
                      , popenKwargs={} ):
         """
-        Will forward `cmd' as a string or a tuple within the `subprocess.Popen'
-        call treating its return code and stdout/stderr.
-        Upon successful submission will return job `ID' and `queue' information
-        about job just being submitted.
-        Will raise `LSFSubmissionFailure' on failure.
+        ...
         """
         L = logging.getLogger(__name__)
-        super().__init__( jobName, nProcs )
-        # Form the full bsub tuple:
-        #- Prepare the bsub arguments:
-        self._cmdArgs = [cfg['execs.bsub']]
-        bsubArgs = copy.deepcopy(cfg['bsub'])
-        bsubArgs.update(backendArguments)
-        # Form the LSF submission arguments
-        for k, v in bsubArgs.items():
-            self._cmdArgs.append( '-%s'%k )
-            if v is not None:
-                self._cmdArgs.append(str(v))
-        if 'q' not in bsubArgs.keys():
-            raise RuntimeError('LSF queue is not specified')  # TODO: warning
-        lsfMacros = { 'jIndex' : '%I', 'jID' : '%J' }
-        self._cmdArgs.append( '-J%s'%(jobName if 1 == nProcs else "%s[1,%d]"%(jobName, nProcs)) )
-        self._cmdArgs.append( '-oo%s'%stdout.format(lsfMacros) )
-        self._cmdArgs.append( '-eo%s'%stderr.format(lsfMacros) )
-        #- Append the command:
-        self._stdinCmds = None
-        if type(cmd) is None \
-        or (type(cmd) is str and '-' == cmd) \
-        or not cmd:
-            self._stdinCmds = ''
-            # Read from stdin
-            for line in sys.stdin:
-                self._stdinCmds += line
-            L.debug( "Stdin input: %s"%self._stdinCmds )
-            if not self._stdinCmds:
-                raise ValueError( "Empty stdin input given for job submission." )
-        elif type(cmd) is str:
-            self._cmdArgs += shlex.split(cmd)
-        elif type(self._cmdArgs) is not list:
-            raise TypeError( "First argument for submit is expected to be' \
-                    ' either str or list. Got %s."%type(cmd) )
-        if cmd:
-            self._cmdArgs += copy.deepcopy(cmd)
+        # Set up bsub, pre-form/validate data for command line invocation
+        self.bsubExec = cfg['execs.bsub']
+        self.bsubArgs = copy.deepcopy(cfg['bsub'])
+        self.bsubArgs.update(backendArguments)
+        for k in ['J', 'oo', 'oe', 'o', 'e']:
+            if k in self.bsubArgs:
+                v = self.bsubArgs.pop(k, None)
+                L.warning( '\"-%s\"%s LSF backend argument will be ignored in'
+                    ' favor of one defined by LSF'
+                    ' back-end.'%(k, '="%s"'%str(v) if v else '') )
+        if 'q' not in self.bsubArgs.keys():
+            L.warning('LSF queue is not specified.'
+                    ' Default LSF queue will be used.')
+        # Initialize basic parent properties:
+        super().__init__( jobName, target, nProcs )
+        # Now, treat the target command in LSF way.
+        if self.isImplicitArray:
+            self.bsubTarget = \
+                [self.compose_array_script( self.tCmd[0], self.tCmd[1:],
+                        submissionFilePath=backendArguments.get('submissionFilePath', None))]
+        else:
+            self.bsubTarget = copy.deepcopy(cmd)
         # Sets the default popen's kwargs and override it by user's kwargs
         self.pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
                                  , 'stderr' : subprocess.PIPE
+                                 , 'timeout' : timeut
                                  , 'universal_newlines' : True })
         self.pkw.update(popenKwargs)
-        self.timeout = timeout
 
 class LSFBackend(lamia.backend.interface.BatchBackend):
     """

@@ -19,7 +19,7 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import abc, os, logging, sys, copy, argparse, re, enum
+import abc, os, logging, sys, copy, argparse, re, enum, itertools
 import lamia.core.configuration \
      , lamia.logging \
      , lamia.core.task
@@ -55,6 +55,40 @@ class JListFailure(BackendCommandError):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+def expand_cmd_args( cmd ):
+    """
+    Used to derive the command line arguments lines in case when one or more
+    arguments are given as a sequence (set, list or tuple), meaning multi-job
+    invocation (job arrays in LSF, job clusters in HTCondor, etc.)
+    Initially was designed to be used in LSF back-end (produces walk-through
+    list of arguments).
+    """
+    cmd_ = [ c if type(c) in (set, tuple, list) else (c,) for c in cmd ]
+    for cmdEntry in itertools.product(*cmd_):
+        for c in cmdEntry:
+            if type(c) not in (str, int, float):
+                raise TypeError("Bad type provided for command line: \"%s\"."%(
+                    type(c).__name__))
+        yield cmdEntry
+
+def inject_placeholders( cmd, placeholderFormat='$(Item%d)' ):
+    """
+    For given list of command-line arguments, returns two entites: the modified
+    arguments where corresponding sequences are substituted by placeholders, and
+    the dictionary where this placeholders index sequences.
+    Corresponds to the way HTCondor offers to condition the batch jobs.
+    """
+    cmd = list(cmd)
+    sqIdxs = [n if type(x) in (set, tuple, list) else None for n, x in enumerate(cmd)]
+    sqIdxs = filter( lambda x : x is not None, sqIdxs)
+    varsSet = {}
+    for n, idx in enumerate(sqIdxs):
+        phName = placeholderFormat%n
+        varsSet[phName] = cmd[idx]
+        cmd[idx] = phName
+    return cmd, varsSet
+
+
 class Submission(abc.ABC):
     """
     Abstract interface for submission job data.
@@ -65,18 +99,62 @@ class Submission(abc.ABC):
     these instances will be provided to `dispatch_jobs()' method of the
     back-end instance.
     """
-    def __init__( self, jobName, nProcs ):
+    @property
+    def stdinTarget(self):
+        """
+        Returns whether or not the target to be executed is stdin.
+        """
+        return hasattr(self, 'stdin') and self.stdin
+
+    @property
+    def isImplicitArray(self):
+        """
+        If at least one of the command-line arguments provided is a sequence
+        of >1 length, the submission has to be considered as an
+        `implicit array' -- the bunch of parallel jobs steered by queue entry.
+        """
+        return (not self.stdinTarget) \
+                and any([type(x) in (set, list, tuple) for x in self.tCmd])
+
+    @property
+    def jobName(self):
+        return self._jobName
+
+    @property
+    def dependencies(self):
+        return self._deps
+
+    def __init__( self, jobName, tCmd, nProcs ):
         self._deps = []
         self._jobName = jobName
+        self.stdin = None
+        # Set self.tCmd/slef.stdin
+        if type(tCmd) is None or not tCmd or (type(tCmd) is str and '-' == tCmd) :
+            self.acquire_stdin_input()
+        elif type(tCmd) is str:
+            self.tCmd += shlex.split(tCmd)
+            L.debug('Command splitted: "%s" -> [%s]'%(tCmd
+                , ', '.join(['"%s"'], self.tCmd) ))
+        elif type(tCmd) in (list, tuple):
+            self.tCmd = tCmd
+        else:
+            raise TypeError( "First argument for submit is expected to be' \
+                    ' either str or list. Got %s."%type(tCmd) )
         self._nProcs = nProcs
+
+    def acquire_stdin_input(self):
+        self.stdin = ''
+        # Read from stdin
+        for line in sys.stdin:
+            self.stdin += line
+        L.debug( "Stdin input:\n%s"%self._stdinCmds )
+        if not self.stdin:
+            raise ValueError( "Empty stdin input given for job submission." )
 
     def add_dep( self, dep, props=None ):
         assert( isinstance( dep, Submission ) )
-        self._deps.append( (dep, props) )
+        self.deps.append( (dep, props) )
 
-    @property
-    def deps(self):
-        return self._deps
 
 class BatchBackend(abc.ABC):
     """
