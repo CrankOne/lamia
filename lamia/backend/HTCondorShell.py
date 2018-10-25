@@ -87,7 +87,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
         # submission file ad-hoc seems to be a better alternative since ClassAd
         # syntax is pretty straightforward, even what is concerned `queue'
         # keyword.
-        cad["executable"] = self.tCmd[0]
+        cad["executable"] = self.tCmd[0]  #os.path.abspath( self.tCmd[0] )
         dn, fexec = os.path.split(self.tCmd[0])
         # Put the submission file nearby of exec, if it is not supplied by
         # back-end arguments
@@ -163,8 +163,8 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
         super().__init__(jobName, cmd, nProcs)
         baseAd = copy.deepcopy( cfg['classAds.submit'] )
         baseAd.update({
-                'output' : stdout,
-                'error' : stderr
+                'output' : stdout.format(**self.macros()),
+                'error' : stderr.format(**self.macros())
             })
         submissionFilePath = self._mk_subm_classAd( nProcs, baseAd )
         self.cmd = [ cfg['execs.condorSubmit'], submissionFilePath
@@ -220,7 +220,7 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             ret = { 'jID' : [jidBgn, jidEnd] }
             L.info( 'Multiple HTCondor jobs submitted: %d.%d - %d.%d.'%(
                 jidBgn[0], jidBgn[1], jidEnd[0], jidEnd[1] ) )
-        return ret, classAdDict
+        return ret
 
     def __init__(self, config):
         super().__init__(config)
