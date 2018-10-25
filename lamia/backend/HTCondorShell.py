@@ -54,8 +54,8 @@ def serialize_queue( qd, nProc ):
     per single homogeneous product.
     """
     rxItem = re.compile(r'\$\((?P<name>Item\d+)\)')
-    if type(qd) is int:
-        return "queue %d"%nProc
+    if qd is None:
+        return "queue %d"%nProc, 1
     # items multiline list
     imlk, imlv = [], []
     for k in qd.keys():
@@ -138,7 +138,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                     raise TypeError('Can not serialize type `%s\' into classAd'
                         ' file.'%type(v).__name__ )
                 f.write( '%s = %s\n'%(k, strV) )
-            qs, self._nImplicitJobs = serialize_queue(cad['queue'], nProcs)
+            qs, self._nImplicitJobs = serialize_queue(cad.get('queue', None), nProcs)
             f.write(qs)
         return submissionFilePath
 
