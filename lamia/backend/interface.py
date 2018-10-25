@@ -126,7 +126,23 @@ class Submission(abc.ABC):
 
     @property
     def nProcs(self):
+        """
+        Returns number of explicit processes. Does not count the implicit
+        multiplication (due to the resolution of sequence arguments).
+        """
         return self._nProcs
+
+    @property
+    def nImplicitJobs(self):
+        """
+        Returns number of implicit processes. Does not count the explicit
+        multiplication (given by `nProcs' argument).
+        """
+        if hasattr(self, '_nImplicitJobs'):
+            # This attribute has to be set by the back-end.
+            return self._nImplicitJobs
+        lengths = [ len(a) if type(a) in (set, list, tuple) else 1 for a in self.tCmd[1:] ]
+        return functools.reduce( lambda p, x: p*x, lengths )
 
     def __init__( self, jobName, tCmd, nProcs ):
         self._deps = []
@@ -144,7 +160,7 @@ class Submission(abc.ABC):
         else:
             raise TypeError( "First argument for submit is expected to be' \
                     ' either str or list. Got %s."%type(tCmd) )
-        self._nProcs = nProcs
+        self._nProcs = nProcs or 1
 
     def acquire_stdin_input(self):
         self.stdin = ''

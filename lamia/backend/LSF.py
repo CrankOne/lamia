@@ -84,8 +84,8 @@ class LSFSubmission(lamia.backend.interface.Submission):
             return super().jobName
         else:
             n = self.nProcs
-            if hasattr(self, 'nImplicitJobs') and self.nImplicitJobs > 1:
-                n *= self.nImplicitJobs
+            if hasattr(self, '_nImplicitJobs') and self._nImplicitJobs > 1:
+                n *= self._nImplicitJobs
             return '%s[1-%d]'%(super().jobName, n)
 
     @property
@@ -116,7 +116,7 @@ class LSFSubmission(lamia.backend.interface.Submission):
         if submissionFilePath is None:
             dn, fexec = os.path.split(execTarget)
             submissionFilePath = os.path.join( dn, fexec + '.LSF.sh' )
-        self.nImplicitJobs = 0
+        self._nImplicitJobs = 0
         with open(submissionFilePath) as f:
             f.write("#!/bin/bash\n")
             f.write("# Shell script to be processed on LSF batch.\n")
@@ -125,7 +125,7 @@ class LSFSubmission(lamia.backend.interface.Submission):
                 f.write('  ')
                 f.write( ';'.join(argTuple) )
                 f.write('  # %d\n'%n )
-                self.nImplicitJobs += 1
+                self._nImplicitJobs += 1
             f.write(")\n")
             f.write("IFS=\"%s\" %s ${cmdArgs[$LSB_JOBINDEX]}")
             f.write("exit $?")
@@ -141,7 +141,7 @@ class LSFSubmission(lamia.backend.interface.Submission):
                      , backendArguments={}
                      , popenKwargs={} ):
         """
-        ...
+        Constructs the submission entry based on the given arguments.
         """
         L = logging.getLogger(__name__)
         # Set up bsub, pre-form/validate data for command line invocation

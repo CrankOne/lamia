@@ -23,7 +23,7 @@
 The shell utilities to the HTCondor facility is the most elaborated way to
 interact with its interfaces (and actually an only full-fledged one).
 """
-import logging, re, os, copy, subprocess
+import logging, re, os, copy, subprocess, itertools
 import lamia.backend.interface
 
 # HTCondor job ID syntax, ususally consisting of <clusterID>.<ProcessID>
@@ -48,11 +48,100 @@ gDefaults = {
         }
     }
 
+def serialize_queue( qd, nProc ):
+    """
+    Returns HTCondor's `queue ...' string and number of parallel processes
+    per single homogeneous product.
+    """
+    rxItem = re.compile(r'\$\((?P<name>Item\d+)\)')
+    if type(qd) is int:
+        return "queue %d"%nProc
+    # items multiline list
+    imlk, imlv = [], []
+    for k in qd.keys():
+        m = rxItem.match(k)
+        if m:
+            imlk.append(m.groupdict()['name'])
+        imlv.append( qd[k] )
+    argsLines = []
+    for cmb in itertools.product(*imlv):
+        argsLines.append(' '.join(cmb))
+    return "queue %d %s from (\n%s\n)"%( nProc
+                                       , ','.join(imlk)
+                                       , '\n'.join(argsLines) ), len(argsLines)
+
 class HTCondorShellSubmission(lamia.backend.interface.Submission):
     """
     An HTCondor job submission representation.
     Ctr composes arguments for `condor_submit' shell invocation.
     """
+    @staticmethod
+    def macros():
+        return { 'jIndex' : '$(Process)'
+               , 'jID' : '$(Cluster).$(Process)' }
+
+    def _mk_subm_classAd( self, nProcs, cad ):
+        L = logging.getLogger(__name__)
+        # NOTE: the native `classad' module's instances seems to be pretty
+        # useless due to their rudimentary serialization mechanism. Writing the
+        # submission file ad-hoc seems to be a better alternative since ClassAd
+        # syntax is pretty straightforward, even what is concerned `queue'
+        # keyword.
+        cad["executable"] = self.tCmd[0]
+        dn, fexec = os.path.split(self.tCmd[0])
+        # Put the submission file nearby of exec, if it is not supplied by
+        # back-end arguments
+        if 'submissionFile' not in self.condorSubmitArgs:
+            submissionFilePath = os.path.join( dn, fexec + '.htcondor-sub')
+        else:
+            submissionFilePath = self.condorSubmitArgs.pop('submissionFile').format(**self.macros())
+        # Put the user-log file nearby of exec, if it is not supplied by
+        # back-end arguments
+        if 'userLog' not in self.condorSubmitArgs:
+            cad["userLog"] = os.path.join( dn, fexec + '.htcondor-log')
+        else:
+            cad["userLog"] = self.condorSubmitArgs.pop('userLog').format(**self.macros())
+        #
+        if self.nProcs > 1:
+            if 'environment' in cad:
+                assert(type(cad['environment'] is dict))
+                if 'HTCONDOR_JOBINDEX' in cad['environment']:
+                    L.error( "The `HTCONDOR_JOBINDEX' specified for the"
+                            " environment will be overriden." )
+            else:
+                cad['environment'] = {}
+            cad['environment']['HTCONDOR_JOBINDEX'] = '$(Process)'
+        if len(self.tCmd) > 1:
+            if not self.isImplicitArray:
+                cad["arguments"] = self.tCmd[1:]
+                nProcs = 1
+            else:
+                cad["arguments"], cad['queue'] = \
+                        lamia.backend.interface.inject_placeholders(
+                                self.tCmd[1:], placeholderFormat="$(Item%d)" )
+        # backendArguments['classAd']
+        with open(submissionFilePath, 'w') as f:
+            for k, v in cad.items():
+                if 'queue' == k:
+                    continue  # syntax differs for queue
+                if type(v) is list \
+                or type(v) is tuple:
+                    strV = ' '.join(v)
+                elif type(v) in (int, float, str):
+                    strV = str(v)
+                elif type(v) is dict:
+                    # we escape the double quotes here (acc. to
+                    # `man condor_submit' it has been done with double-quotes (""))
+                    strV = '"%s"'%(' '.join(['%s=%s'%(k, vv.replace('"', '""')) \
+                                                for k, vv in v.items()]))
+                else:
+                    raise TypeError('Can not serialize type `%s\' into classAd'
+                        ' file.'%type(v).__name__ )
+                f.write( '%s = %s\n'%(k, strV) )
+            qs, self._nImplicitJobs = serialize_queue(cad['queue'], nProcs)
+            f.write(qs)
+        return submissionFilePath
+
     def __init__( self, jobName, cfg
                 , cmd=None
                 , nProcs=1
@@ -60,91 +149,32 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 , timeout=300
                 , backendArguments={}
                 , popenKwargs={} ):
-        assert(stdout)
-        assert(stderr)
         L = logging.getLogger(__name__)
-        self.timeout = timeout
-        if type(cmd) is None \
-        or (type(cmd) is str and '-' == cmd) \
-        or not cmd:
-            # TODO: consider to use `-interactive' to `condor_sub'
-            raise NotImplementedError("Input from stdin for HTCondor backend"
-                    " is not yet implemented.")
-        else:
-            self._stdinCmds = None
-        if type(cmd) is str:
-            cmd = [cmd]
-        elif type(cmd) is not list:
-            raise TypeError( 'First argument is expected to be a list' \
-                            ' not a `%s\'.'%type(cmd) )
-        # NOTE: the native `classad' module's instances seems to be pretty
-        # useless due to their rudimentary serialization mechanism. Writing the
-        # submission file ad-hoc seems to be a better alternative since ClassAd
-        # syntax is pretty straightforward, even what is concerned `queue'
-        # keyword.
-        cad = copy.deepcopy(cfg['classAds.submit'])
-        cad["executable"] = os.path.abspath(cmd[0])
-        if 'submissionFile' not in backendArguments:
-            dn, fexec = os.path.split(cad["executable"])
-            submissionFilePath = os.path.join( dn, fexec + '.htcondor-sub')
-        else:
-            submissionFilePath = backendArguments['submissionFile']
-        if 'userLogFile' not in backendArguments:
-            dn, fexec = os.path.split(cad["executable"])
-            uLogFilePath = os.path.join( dn, fexec + '.htcondor-log')
-        else:
-            uLogFilePath = backendArguments['userLogFile']
-        if len(cad) > 1:
-            cad["arguments"] = cmd[1:]
-        htcndrMacros = { 'jIndex' : '$(Process)'
-                       , 'jID' : '$(Cluster).$(Process)' }
-        cad.update({
-            "output" : stdout.format(**htcndrMacros),
-            "error" : stderr.format(**htcndrMacros),
-            "userLog" : uLogFilePath
-        })
-        if 'classAd' in backendArguments:
-            cad.update( backendArguments['classAd'] )
-        htcondorJobIndexVal = 'SINGLE' if 1 == nProcs else '$(Process)'
-        if 'environment' in cad:
-            assert(type(cad['environment'] is dict))
-            if 'HTCONDOR_JOBINDEX' in cad['environment']:
-                L.error( "The `HTCONDOR_JOBINDEX' specified for the"
-                        " nevironment will be overriden"
-                        " with \"%s\"."%htcondorJobIndexVal )
-        else:
-            cad['environment'] = {}
-        cad['environment']['HTCONDOR_JOBINDEX'] = htcondorJobIndexVal
-        # NOTE: we do not escape the double quotes here (acc. to
-        # `man condor_submit' it has been done with double-quotes ("")),
-        # making this to be a user responsibility.
-        s = '"%s"'%(' '.join(['%s=%s'%(k, v) for k, v in cad['environment'].items()]))
-        cad['environment'] = s
-        with open(submissionFilePath, 'w') as f:
-            for k, v in cad.items():
-                if type(v) is list \
-                or type(v) is tuple:
-                    strV = ' '.join(v)
-                elif type(v) in (int, float, str):
-                    strV = str(v)
-                else:
-                    raise TypeError('Can not serialize type `%s\' into classAd'
-                        ' file.'%type(v).__name__ )
-                f.write( '%s = %s\n'%(k, strV) )
-        # Submission command:
-        self.cmd_ = [ cfg['execs.condorSubmit'], submissionFilePath
+        self.condorSubmitExec = cfg['execs.condorSubmit']
+        self.condorSubmitArgs = copy.deepcopy(cfg['condorSubmit'])
+        self.condorSubmitArgs.update(backendArguments)
+        for k in ['queue', 'terse', 'batch-name', 'output', 'error']:
+            v = self.condorSubmitArgs.pop(k, None)
+            if v:
+                L.warning( '"-%s"%s argument to HTCondor\'s submission exec'
+                        ' will be ignored in favor of one defined'
+                        ' programmatically, by back-end instance.'%(k,
+                            '="%s"'%str(v) if v else '') )
+        super().__init__(jobName, cmd, nProcs)
+        baseAd = copy.deepcopy( cfg['classAds.submit'] )
+        baseAd.update({
+                'output' : stdout,
+                'error' : stderr
+            })
+        submissionFilePath = self._mk_subm_classAd( nProcs, baseAd )
+        self.cmd = [ cfg['execs.condorSubmit'], submissionFilePath
                , '-terse'
                , '-batch-name', jobName
-               , '-queue', '%d'%nProcs  #< must be last cmd arg!
                ]
         self.pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
                                  , 'stderr' : subprocess.PIPE
                                  , 'universal_newlines' : True })
         self.pkw.update(popenKwargs)
-        self.classAdDict = cad
-        assert(nProcs)
-        assert(jobName)
-        super().__init__(jobName, nProcs)
 
 class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
     """
@@ -155,18 +185,12 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
     def backend_type():
         return 'HTCondorShell'
 
-    def _submit( self
-               , cmd_
-               , stdinCmds  # TODO: use
-               , pkw
-               , classAdDict
-               , timeout=300
-               ):
+    def _submit( self, j ):
         L = logging.getLogger(__name__)
         try:
-            L.debug("Supplementary popen() arguments: %s."%str(pkw) )
-            submJob = subprocess.Popen(cmd_, **pkw)
-            out, err = submJob.communicate( timeout=timeout )
+            L.debug("Supplementary popen() arguments: %s."%str(j.pkw) )
+            submJob = subprocess.Popen(j.cmd, **j.pkw)
+            out, err = submJob.communicate( timeout=self.cfg['timeouts.condorSubmit'] )
             rc = submJob.returncode
             L.debug('condor_submit stdout: <<%s>>'%out)
             m = rxJSubmitted.match( out )
@@ -216,9 +240,9 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
 
     def dispatch_jobs(self, j):
         assert( isinstance(j, HTCondorShellSubmission) )
-        if j.deps:
+        if j.dependencies:
             raise NotImplementedError("Dependencies is not yet supported.")  # TODO
-        return self._submit( j.cmd_, j._stdinCmds, j.pkw, j.classAdDict, timeout=j.timeout )
+        return self._submit( j )
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass
