@@ -225,8 +225,8 @@ class Templates(object):
         # Require target dir to be accessible and actually a dir (or a symlink
         # to dir)
         for d in templatesDirs:
-            if not os.path.isdir(d):
-                raise ValueError( 'Not a directory: "%s".'%d )
+            if type(d) is not str or not os.path.isdir(d):
+                raise ValueError( 'Not a directory: "%s".'%str(d) )
         # Set template interpolators, create loader (loads templates instantly,
         # create template-rendering environment)
         self.loaderInterpolators = loaderInterpolators

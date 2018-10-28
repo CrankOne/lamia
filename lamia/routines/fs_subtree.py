@@ -190,8 +190,8 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
     @property
     def t(self):
         if not self._templates:
-            if self._pathCtxs is None:
-                pd = [c.format(**self.pStk) if type(c) is str else c for c in self.templatesDirs],
+            if self._pathCtxs is not None:
+                pd = list(pde.format(**self.pStk) if type(pde) is str else pde for pde in self.templatesDirs)
             else:
                 pd = self.templatesDirs
             self._templates = lamia.core.templates.Templates( pd
