@@ -22,7 +22,7 @@
 Filesystem tree creating routine.
 """
 #                               *** *** ***
-import os, sys, logging, argparse, yaml, collections
+import os, sys, logging, argparse, yaml, collections, io
 import lamia.logging \
      , lamia.core.templates \
      , lamia.core.filesystem \
@@ -92,7 +92,8 @@ Note, that `--path-def'" entries will not take effect unless --path-ctx=@user is
 specified.
 """
 
-def parse_fstruct( fstruct, fstructConf='default', pathVariables=None ):
+def parse_fstruct( fstruct, fstructConf='default'
+                 , pathVariables=None, contents={} ):
     """
     Returns object that typically consumed by lamia.core.filesystem.Paths
     instance constructor.
@@ -139,6 +140,79 @@ def parse_fstruct( fstruct, fstructConf='default', pathVariables=None ):
         # will support nested dictionaries
     return dict(fStrObj)
 #                               *** *** ***
+class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
+    """
+    Stateful environment object for filesystem subtree deployment.
+    Designed to encapsulate complex initialization procedures for
+    definitions and contexts.
+    """
+    def __init__( self, templatesDirs ):
+        super().__init__(templatesDirs)
+        self._contexts = None
+        self._pathCtxs = None
+        # This data member contains indexed set of in-memory file-like objects
+        # that are produced by some routines prior to be written within the
+        # particular file structure.
+        self._memFiles = {}
+
+    def set_contexts( self, contexts, definitions=[] ):
+        self._contexts = contexts
+        self._ctxDefs = definitions
+
+    def autopath( self, fstruct ):
+        """
+        For given Paths() instance produces a shortcut function to
+        lamia.core.filesystem.auto_path(), relying on current `pStk'.
+        """
+        def _ap( v, requireComplete=True ):
+            return lamia.core.filesystem.auto_path(
+                    v, fStruct=fstruct
+                    , requireComplete=requireComplete, **self.pStk )
+        return _ap
+
+    @property
+    def rStk(self):
+        ctxs = self._contexts
+        if self._pathCtxs:
+            ctxs = [c.format(**self.pStk) if type(c) is str else c for c in self._contexts]
+        return lamia.core.configuration.compose_stack( ctxs, self._ctxDefs )
+
+    def set_path_templating( self, pathContexts, pathDefinitions=[] ):
+        self._pathCtxs = pathContexts
+        self._pathDefs = pathDefinitions
+        # contexts_ = [c.format(**self.pStk) if type(c) is str else c for c in contexts]
+
+    @property
+    def pStk(self):
+        return lamia.core.configuration.compose_stack( self._pathCtxs,
+                self._pathDefs )
+
+    @property
+    def t(self):
+        if not self._templates:
+            if self._pathCtxs is None:
+                pd = [c.format(**self.pStk) if type(c) is str else c for c in self.templatesDirs],
+            else:
+                pd = self.templatesDirs
+            self._templates = lamia.core.templates.Templates( pd
+                                      , loaderInterpolators=self.tli
+                                      , additionalFilters=self.filters
+                                      , extensions=['jinja2.ext.do'] )
+            del self.templatesDirs
+        return self._templates
+
+    def memfile(self, label):
+        if label not in self._memFiles:
+            self._memFiles[label] = io.StringIO()
+        return self._memFiles[label]
+
+    def subtree(self, fstruct, fstructConf='default'):
+        # { k : s.getvalue() for k, s in self._memFiles.items() }
+        return lamia.core.filesystem.FSSubtreeContext(
+                parse_fstruct( fstruct, fstructConf
+                             , pathVariables=self.pStk ),
+                onFailure=None )  #< TODO: on-failure confirm created subtree removal
+#                               *** *** ***
 class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                        , metaclass=lamia.core.task.TaskClass ):
     """
@@ -151,19 +225,11 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
     __defaults=gDefaults
     __epilog=gEpilog
 
-    class FStructContext(object):
-        def __init__(self, ref):
-            self._ref = ref
-
-        def __enter__(self):
-            pass
-        def __exit__(self, excType, excValue, traceBack):
-            pass
-
     def deploy_subtree( self, outputDir, fstruct
              , fstructConf='default'
              , templatesDirs=[]
-             , showDiff=False ):
+             , showDiff=False
+             , env=None ):
         """
         Single function performing rendering of the subtree. Arguments:
         @outputDir -- defines the base (target) directory where subtree has to
@@ -187,29 +253,20 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         Note: probably, pointless. We usually need to perform some operations in
         between of path template-rendering and generating the actual subtree.
         """
-        # TODO: confirm created subtree removal on failure
-        with lamia.core.filesystem.FSSubtreeContext( parse_fstruct(fstruct, fstructConf, pathVariables=self.pStk),
-                                                     onFailure=None ) as fstruct \
-           , lamia.routines.render.TemplateEnvironment( [t.format(**self.pStk) for t in templatesDirs] ) as t:
-            t['templates'].deploy_fs_struct( outputDir, fstruct, self.pStk, templateContext=self.rStk )
-
-    def setup_contexts(self, contexts=[], definitions=[]
-             , pathContexts=[], pathDefinitions=[]
-             , templatesDirs=[]):
-        self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
-        contexts_ = [c.format(**self.pStk) if type(c) is str else c for c in contexts]
-        self.rStk = lamia.core.configuration.compose_stack(contexts_, definitions)
+        if showDiff: raise NotImplementedError('Subtree diffs.')  # TODO
+        with self.env.subtree( fstruct, fstructConf=fstructConf) as fstruct:
+            self.env.t.deploy_fs_struct( outputDir, fstruct, self.env.pStk
+                                  , templateContext=self.env.rStk )
 
     def _main( self, outputDir, fstruct
              , fstructConf='default'
              , contexts=[], definitions=[]
              , pathContexts=[], pathDefinitions=[]
              , templatesDirs=[]
-             , showDiff=False
-             , onFinish=None ):
-        self.setup_contexts( contexts=contexts, definitions=definitions
-                           , pathContexts=pathContexts, pathDefinitions=pathDefinitions
-                           , templatesDirs=templatesDirs )
+             , showDiff=False ):
+        self.env = DeploymentEnv(templatesDirs)
+        self.taskCfg.apply( self.env.set_path_templating )
+        self.taskCfg.apply( self.env.set_contexts )
         self.deploy_subtree( outputDir, fstruct
                            , fstructConf=fstructConf
                            , templatesDirs=templatesDirs

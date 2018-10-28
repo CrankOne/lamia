@@ -79,29 +79,28 @@ Consider that using same stdin few times, however being a bad style.
 #                               *** *** ***
 class TemplateEnvironment(object):
     """
-    Default template environment for lamia tasks
+    Default template environment for lamia tasks.
     """
     def __init__(self, templatesDirs):
         L = logging.getLogger(__name__)
-        if hasattr(self, '_templates'):
-            L.warning('Re-initialization of associated templates object.')
-        else:
-            L.debug('Initialization of associated templates object.')
-        self._tli = lamia.core.interpolation.Processor()
+        self.templatesDirs = templatesDirs
+        self._templates = None
+        self.tli = lamia.core.interpolation.Processor()
         #self._tli['REAL_PATH'] = os.path.realpath
         #self._tli['PATH_VAR'] = lambda nm: str(self.pStk[nm])
-        self._fltrs = { 'abspath'    : lamia.core.templates.AbsPathFilter(os.getcwd())
-                      , 'commonpath' : lamia.core.templates.CommonPathFilter(os.getcwd()) }
-        self._templates = lamia.core.templates.Templates( templatesDirs
-                                      , loaderInterpolators=self._tli
-                                      , additionalFilters=self._fltrs
+        self.filters = { 'abspath'    : lamia.core.templates.AbsPathFilter(os.getcwd())
+                       , 'commonpath' : lamia.core.templates.CommonPathFilter(os.getcwd()) }
+
+    @property
+    def t(self):
+        if not self._templates:
+            self._templates = lamia.core.templates.Templates( self.templatesDirs
+                                      , loaderInterpolators=self.tli
+                                      , additionalFilters=self.filters
                                       , extensions=['jinja2.ext.do'] )
-    def __enter__(self):
-        return {'templates' : self._templates, 'filters' : self._fltrs}
-
-    def __exit__(self, excType, excValue, traceBack):
-        pass
-
+            del self.templatesDirs
+        return self._templates
+#                               *** *** ***
 class RenderTemplateTask( lamia.core.task.Task
                         , metaclass=lamia.core.task.TaskClass ):
     """
@@ -112,7 +111,7 @@ class RenderTemplateTask( lamia.core.task.Task
     __defaults = gDefaults
     __epilog = gEpilog
 
-    def render_template(self, tmplName, rStk, t):
+    def render_template(self, tmplName, rStk, te):
         """
         Standalone template-rendering method. Has low reentrant potential.
         """
@@ -123,7 +122,7 @@ class RenderTemplateTask( lamia.core.task.Task
             if not tmplTxt or len(tmplTxt) is None:
                 L.error('Skipping template string of length zero got from stdin.')
             L.debug( 'template input of length %d slurped.'%len(tmplTxt) )
-            txtRendered = lamia.core.templates.render_string( tmplTxt, t['filters'], **rStk )
+            txtRendered = lamia.core.templates.render_string( tmplTxt, te.filters, **rStk )
             L.debug( 'Rendering template <string of length %d> -> stdout.'%(len(tmplTxt)) )
             sys.stdout.write( txtRendered )
             return
@@ -136,7 +135,7 @@ class RenderTemplateTask( lamia.core.task.Task
             # template name and try to render it as is.
             tmplOutFile = '-'
         L.debug( 'Rendering template "%s" -> "%s".'%(tmplName, tmplOutFile) )
-        txtRendered = t['templates']( tmplName, **rStk )
+        txtRendered = te.t( tmplName, **rStk )
         if '-' == tmplOutFile:
             sys.stdout.write( txtRendered )
         else:
@@ -155,11 +154,11 @@ class RenderTemplateTask( lamia.core.task.Task
         """
         L = logging.getLogger(__name__)
         assert(template)
-        with lamia.core.configuration.StackConfs(*contexts, *definitions) as rStk \
-           , TemplateEnvironment(templatesDirs) as t:
-            for tmplName in template:
-                L.debug( 'Rendering template %s...'%tmplName )
-                self.render_template( tmplName, rStk, t )
+        rStk = lamia.core.configuration.compose_stack( contexts, definitions )
+        te = TemplateEnvironment(templatesDirs)
+        for tmplName in template:
+            L.debug( 'Rendering template %s...'%tmplName )
+            self.render_template( tmplName, rStk, te )
         return 0
 #                               *** *** ***
 if "__main__" == __name__:

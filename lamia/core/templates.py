@@ -323,6 +323,5 @@ class ContextStack(jinja2.ext.Extension):
         tagTok = next( parser.stream )
         while parser.stream.current.type != jinja2.lexer.TOKEN_BLOCK_END:
             tok = next( parser.stream )
-            print( '%s <= %s'%(tok, tok.type) )  #XXX
         #ctxRef = jinja2.ext.nodes.ContextReference()
 

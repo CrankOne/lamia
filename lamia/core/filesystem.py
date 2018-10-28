@@ -111,7 +111,7 @@ def py_index_to_pdict(k):
         k = k.replace(']', '')
         return k
 
-def _rv_value(d, k):
+def _rv_value(d, k, requireComplete=True):
     """
     Internal parsing function dealing with format-like indexing, e.g.:
         some[1]
@@ -119,7 +119,14 @@ def _rv_value(d, k):
         some[other]
     etc.
     """
-    return dpath.get(d, py_index_to_pdict(k), separator='.')
+    key = py_index_to_pdict(k)
+    r = dpath.util.search( d, key, separator='.' )
+    if r:
+        return dpath.get(d, key, separator='.')
+    elif not requireComplete:
+        return k
+    else:
+        raise KeyError(k)
 
 def render_path_templates(*args, requireComplete=True, **kwargs):
     """
@@ -135,7 +142,7 @@ def render_path_templates(*args, requireComplete=True, **kwargs):
     s = os.path.join(*args)
     keys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)]))
     try:
-        for skwargs in dict_product(**{ k : _rv_value(kwargs, k) for k in keys }):
+        for skwargs in dict_product(**{ k : _rv_value(kwargs, k, requireComplete=requireComplete) for k in keys }):
             dfw = DictFormatWrapper( **dict(skwargs)
                                    , requireComplete=requireComplete )
             try:
@@ -347,12 +354,13 @@ class Paths( collections.MutableMapping ):
         except KeyError:
             # TODO: move to dedicated exception `UnknownAlias' with available
             # keys associated.
-            L.error('"%s" not in available aliases: %s'%(
-                ', '.join('"%s"'%a for a in self._aliases.keys())))
+            L.error( '"%s" not in available aliases: %s'%( alias,
+                ', '.join('"%s"'%str(a) for a in self._aliases.keys())
+                ) )
             raise
         entries = []
         relevantKeys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(pt)]))
-        for argsSubset in dict_product(**{k : _rv_value(kwargs, k) for k in relevantKeys}):
+        for argsSubset in dict_product(**{k : _rv_value(kwargs, k, requireComplete=requireComplete) for k in relevantKeys}):
             entries.append( pt.format_map( DictFormatWrapper( **dict(argsSubset)
                                          , requireComplete=requireComplete)) )
         if 1 == len(entries):
@@ -491,7 +499,8 @@ def auto_path( p
                     ' is provided. Can not affiliate the alias.' )
         return fStruct(p[1:], requireComplete=requireComplete, **kwargs)
     elif '{' in p:
-        r = p.format(**kwargs)
+        r = p.format_map(DictFormatWrapper( **dict(kwargs)
+                    , requireComplete=requireComplete))
         m = rxFmtPat.findall( r )
         if m and requireComplete:
             raise RuntimeError("Path template \"%s\" is incomplete within"

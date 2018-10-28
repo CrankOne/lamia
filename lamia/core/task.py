@@ -110,12 +110,13 @@ class Task(object):
             ps = getattr(self, 'get_%s'%pN)()
             L.debug( 'Task base class: got list of length %d for "%s".'%(
                 len(ps), pN ) )
-            ps = lamia.core.configuration.Stack( ps )
+            ps = lamia.core.configuration.Stack( ps if ps else [] )
             L.debug( 'Top entities in stack: %s.'%(', '.join( '"%s"'%k for k in ps.keys() )) )
             self.add_parameters( ps )
         #self.add_parameters( lamia.core.configuration.Stack(self.get_common_parameters()) )
         #self.add_parameters( lamia.core.configuration.Stack(self.get_exec_parameters()) )
-        dfts = lamia.core.configuration.Stack(self.get_defaults())
+        dfts = self.get_defaults()
+        dfts = lamia.core.configuration.Stack( dfts if dfts else [] )
         self._p.set_defaults( **dfts )
         L.debug( 'Default values set for %s.'%(', '.join(
             ['"%s"="%s"'%(k, str(v)) for k, v in dfts.items()])) )
@@ -229,7 +230,7 @@ class TaskClass(type):
         cumulativeGetters = ['common_parameters']
         if not attributedict.pop('_%s__cumulativeDefaults'%cls.__name__, False):
             attributedict['get_defaults'] = classmethod( lambda cls :
-                    getattr(cls, '_%s__defaults'%cls.__name__) )
+                    getattr(cls, '_%s__defaults'%cls.__name__, {}) )
         else:
             cumulativeGetters.append('defaults')
             L.debug('Default values are set to be cumulative'
@@ -239,7 +240,7 @@ class TaskClass(type):
             attributedict['get_%s_names'%pN] \
                     = cumulative_class_property_keys_getter(pN)
         attributedict['get_exec_parameters'] = classmethod( lambda cls :
-                getattr(cls, '_%s__execParameters'%cls.__name__) )
+                getattr(cls, '_%s__execParameters'%cls.__name__, {}) )
         # Produce class object
         L.debug("New task class derived: `%s'; superclasses: %s; dict: {%s}."%(
             clsname,
@@ -295,7 +296,9 @@ def module_task( className
         , 'gEpilog'
         , '__doc__' ] }
     # Append attributes dict with run() method and ctr:
-    attributes['_main'] = lambda self, *args, **kwargs: entryPoint(*args, **kwargs)
+    def _invoke_main(self):
+        return self.taskCfg.apply(entryPoint)
+    attributes['_main'] = _invoke_main
     #attributes['__init__'] = lambda self: .__init__()  # TODO: ?
     return TaskClass( className
                     , tuple(superclasses)
