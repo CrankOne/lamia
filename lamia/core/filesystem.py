@@ -251,6 +251,9 @@ class DictFormatWrapper(dict):
             return '{%s}'%key
 
 class Paths( collections.MutableMapping ):
+    """
+    A file structure subtree representation.
+    """
     def _treat_expression(self, dirStruct, path=[]):
         ret = {}
         if dirStruct is None or not dirStruct:
@@ -496,4 +499,31 @@ def auto_path( p
         return r
     else:
         return p
+
+
+class FSSubtreeContext(object):
+    """
+    With-statement context for file structure.
+    """
+    def __init__(self, fsManifest, pathDefinitions={}, onFailure=None):
+        """
+        Will construct file structure (if it is not yet being done).
+        """
+        self._fstruct = Paths(fsManifest)
+        self._onFailure = onFailure
+
+    def __enter__(self):
+        """
+        Returns a Paths object, ready for use.
+        """
+        return self._fstruct
+
+    def __exit__(self, excType, excValue, traceBack):
+        L = logging.getLogger(__name__)
+        if excType:
+            if self._onFailure:
+                self._onFailure( self._fstruct, excType, excValue, traceBack )
+            else:
+                L.error( 'onFailure-handler is not set for filesystem subtree'
+                        ' context manager.' )
 

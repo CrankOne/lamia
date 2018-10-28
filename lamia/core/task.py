@@ -101,16 +101,11 @@ class Task(object):
                 self.argParser.add_argument( pName[1:], **pDescr )
                 L.debug('Added a positional argument.')
 
-    def __init__(self):
-        """
-        Initializes the instance's argument parser.
-        """
-        lamia.logging.setup()
-        L = logging.getLogger()
+    def _instantiate_arg_parser(self):
+        L = logging.getLogger(__name__)
         self._p = argparse.ArgumentParser( self.__class__.__doc__,
                 epilog=getattr( self.__class__
-                              , '_%s__epilog'%self.__class__.__name__
-                              , None ) )
+                              , '_%s__epilog'%self.__class__.__name__, None ) )
         for pN in ['common_parameters', 'exec_parameters']:
             ps = getattr(self, 'get_%s'%pN)()
             L.debug( 'Task base class: got list of length %d for "%s".'%(
@@ -125,9 +120,20 @@ class Task(object):
         L.debug( 'Default values set for %s.'%(', '.join(
             ['"%s"="%s"'%(k, str(v)) for k, v in dfts.items()])) )
 
+    def __init__(self):
+        pass
+
     @property
     def argParser(self):
+        if not hasattr(self, '_p'):
+            self._instantiate_arg_parser()
         return self._p
+
+    #def eval_deps(self):
+    #    """
+    #    Evaluates dependencies, if any.
+    #    """
+    #    pass
 
     def run(self, args=sys.argv[1:]):
         L = logging.getLogger()
@@ -136,9 +142,10 @@ class Task(object):
             return 1
         argsDct = { inflection.camelize(k, uppercase_first_letter=False) : v \
                 for k, v in vars(self.argParser.parse_args(args)).items() }
-        # TODO: check compatibility?
         L.debug('Run args: %s'%argsDct)
-        return self._main(**argsDct)
+        self.taskCfg = lamia.core.configuration.Stack(argsDct)
+        #self.eval_deps()
+        return self.taskCfg.apply(self._main)
 
 def cumulative_class_property_getter(prop):
     """
@@ -198,6 +205,12 @@ class TaskClass(type):
     a cumulative dict, i.e. to propagate ones from base classes to child. Note,
     that if direct base classes have their own bases, it won't be automatically
     propagated unles this property is not set for them as well.
+        `__depends' -- a list of deendencies to be evaluated prior to task
+    being defined. May contain entries of following types:
+            - class reference (imported); will be evaluated unconditionally
+            - a pair of function and class reference; will be evaluated if
+            function receiving the result of evaluation is true. Function
+            receives arguments ...
     """
     def __new__(cls, clsname, superclasses, attributedict):
         L = logging.getLogger(__name__)
@@ -219,8 +232,8 @@ class TaskClass(type):
                     getattr(cls, '_%s__defaults'%cls.__name__) )
         else:
             cumulativeGetters.append('defaults')
-            L.debug('Default values are set to be cumulative for class "%s".'%(
-                clsname))
+            L.debug('Default values are set to be cumulative'
+                    ' for class "%s".'%(clsname))
         for pN in cumulativeGetters:
             attributedict['get_%s'%pN] = cumulative_class_property_getter( pN )
             attributedict['get_%s_names'%pN] \

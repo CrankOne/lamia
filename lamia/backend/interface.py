@@ -371,10 +371,10 @@ class BatchTask( lamia.core.task.Task
     """
     __commonParameters = gCommonParameters
 
-    def setup_backend( self, backEndName
-                           , backEndCfg=None ):
-        self._backend = instantiate_backend( backEndName
-                                           , backEndCfg )
+    def setup_backend( self, backend
+                           , backendConfig=None ):
+        self._backend = instantiate_backend( backend
+                                           , backendConfig )
 
     @property
     def backend(self):

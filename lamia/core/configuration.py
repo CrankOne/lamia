@@ -44,7 +44,7 @@ collections within `Configuration' object. Examples:
     ...etc.
 """
 import yaml, dpath.util, copy, collections, logging, sys \
-     , configparser, json, yaml, re, argparse
+     , configparser, json, yaml, re, argparse, inspect
 import lamia.core.interpolation
 from io import IOBase
 from urllib.parse import urlparse
@@ -421,6 +421,56 @@ class Stack(collections.MutableMapping):
             raise NotImplementedError('TODO: support for "%s"'
                     ' conf-overriding action.')
 
+    def stacked(self, *args, **kwargs):
+        """
+        Returns a `StackConfs' instance to be used as `with'-context mgr.
+        """
+        return StackConfs( *args, __base=self, **kwargs )
+
+    def apply(self, callee, argsListName=None ):
+        """
+        Invokes given function with values taken from this config stack,
+        matching to signature.
+        """
+        L = logging.getLogger(__name__)
+        s = inspect.signature(callee)
+        args=[]
+        kwargs={}
+        ctx = copy.copy(dict(self))
+        for pn, p in s.parameters.items():
+            if inspect.Parameter.POSITIONAL_ONLY == p.kind:
+                raise NotImplementedError("Positional only args aren't supported.")
+                #if pn in ctx:  # TODO no name for positional only?
+                #    args.append( ctx.pop(pn) )
+                #elif p.default != inspect.Parameter.empty:
+                #    args.append( p.default )
+                #else:
+                #    raise TypeError('No value for "%s" in call of %s.'%(
+                #        pn, str(f)))
+            elif inspect.Parameter.POSITIONAL_OR_KEYWORD == p.kind:
+                if pn in ctx:
+                    args.append( ctx.pop(pn) )
+                elif p.default != inspect.Parameter.empty:
+                    args.append( p.default )
+                else:
+                    raise TypeError('No value for "%s" in call of %s.'%(
+                        pn, str(callee)))
+            elif inspect.Parameter.VAR_POSITIONAL == p.kind:
+                args += ctx.pop(argsListName) if argsListName in ctx else [[]]
+            elif inspect.Parameter.KEYWORD_ONLY == p.kind:
+                if pn in ctx:
+                    kwargs[pn] = ctx.pop(pn)
+                elif p.default != inspect.Parameter.empty:
+                    kwargs[pn] = p.default
+                else:
+                    raise TypeError('No value given and no default value is'
+                            ' defined for "%s" in call of %s.'%(
+                                pn, str(callee)))
+            elif inspect.Parameter.VAR_KEYWORD == p.kind:
+                kwargs.update(ctx)
+        L.debug('Applying conf stack: %s, %s'%(str(args), str(kwargs)))
+        return callee(*args, **kwargs)
+
 def compose_stack( ctx=[], defs=[] ):
     """
     A common pattern of applying the configuration stack is to specify the list
@@ -433,4 +483,35 @@ def compose_stack( ctx=[], defs=[] ):
     for d in defs:
         stk.argparse_override(d)
     return stk
+
+
+class StackConfs(object):
+    """
+    With-statement context for temporary configuration stacks.
+    """
+    def __init__(self, *args, definitions=[], __base=None, **kwargs):
+        L = logging.getLogger(__name__)
+        if __base is None:
+            self._stk = Stack()
+        elif type(__base) is Stack:
+            self._stk = __base
+        else:
+            self._stk = Stack(__base)
+        self._entries = list(args)
+        self._defs = copy.copy(definitions)
+        self._entries.append(dict(kwargs))
+        L.debug("Entering temporary stack context; entries: %s"%str(self._entries))
+
+    def __enter__(self):
+        for n, c in enumerate(self._entries):
+            self._stk.push( c, tag='%s-%s'%(str(id(self)), str(n)) )
+        for d in self._defs:
+            self._stk.argparse_override(c)
+        return self._stk
+
+    def __exit__(self, excType, excValue, traceBack):
+        for d in self._defs:
+            self._stk.pop()
+        for n, c in reversed(list(enumerate(self._entries))):
+            self._stk.pop( tag='%s-%s'%(str(id(self)), str(n)) )
 

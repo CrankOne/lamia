@@ -81,7 +81,9 @@ gDefaults = {
     'path_contexts' : [],
     'output_dir' : os.getcwd(),
     'path_definitions' : [],
-    'fstruct_conf' : 'default'
+    'fstruct_conf' : 'default',
+    'contexts' : [],
+    'definitions' : []
 }
 gEpilog="""
 To make use of this procedure one need a special definition
@@ -89,6 +91,53 @@ of filesystem subtree to be deployed.
 Note, that `--path-def'" entries will not take effect unless --path-ctx=@user is
 specified.
 """
+
+def parse_fstruct( fstruct, fstructConf='default', pathVariables=None ):
+    """
+    Returns object that typically consumed by lamia.core.filesystem.Paths
+    instance constructor.
+    Applies path interpolating context to given string path.
+    Makes use of the path-interpolation context if appliable.
+    """
+    L = logging.getLogger(__name__)
+    fStrObj = None
+    if type(fstruct) is str:
+        m = lamia.core.filesystem.rxFmtPat.match(fstruct)
+        if m:
+            if pathVariables is not None:
+                fstruct = fstruct.format(**pathVariables)
+                m = lamia.core.filesystem.rxFmtPat.match(fstruct)
+                if m:
+                    raise KeyError("Unable to interpolate path"
+                            " string: \"%s\"."%fstruct )
+            else:
+                L.error('Path "%s" seems to contain formatting pattern'
+                        ' but no path-formatting context being set at the'
+                        ' moment.'%fstruct )
+        with open(fstruct) as f:
+            fStrObj = yaml.load(f)
+    else:
+        fStrObj = yaml.load(fstruct)
+    fStrVer = fStrObj.get('version', '0.0')
+    if '0.0' != fStrVer:  # TODO: finer versions control
+        L.warning( "File structure version %s might be"
+                " unsupported (file \"%s\")."%(fStrVer, fstruct.name \
+                        if hasattr(fstruct, 'name') else fstruct) )
+    fStrObj = fStrObj[fstructConf]
+    if not fStrObj:
+        raise RuntimeError("Empty file structure subtree description.")
+    if 'extends' in fStrObj.keys():
+        L.debug( ' ..loading base file structure description "%s"'%(fStrObj['extends']['path']) )
+        base = parse_fstruct( fStrObj['extends']['path']
+                            , fStrObj['extends'].get('conf', 'default')
+                            , pathVariables=pathVariables )
+        fStrObj.pop('extends')  # wipe it out since it is not an FS entry
+        #base.update(fStrObj)
+        fStrObj = _TODO_recursive_dict_update( base, fStrObj )
+        #fStrObj = lamia.core.configuration.Stack([ base, fStrObj ])
+        # TODO: use it instead of hand-written direct update, once stack
+        # will support nested dictionaries
+    return dict(fStrObj)
 #                               *** *** ***
 class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                        , metaclass=lamia.core.task.TaskClass ):
@@ -102,93 +151,17 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
     __defaults=gDefaults
     __epilog=gEpilog
 
-    def setup_path_templating( self
-                             , pathContexts
-                             , pathDefinitions ):
-        """
-        Based on given paths context and path definitions will set up the
-        `self.pStk' property.
-        """
-        self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
+    class FStructContext(object):
+        def __init__(self, ref):
+            self._ref = ref
 
-    def parse_fstruct( self
-                     , fstruct
-                     , fstructConf ):
-        """
-        Returns object that typically consumed by lamia.core.filesystem.Paths
-        instance constructor.
-        Applies path interpolating context to given string path.
-        Has no side effects on the object itself (no self.XXX properties
-        added).
-        """
-        L = logging.getLogger(__name__)
-        fStrObj = None
-        if type(fstruct) is str:
-            m = lamia.core.filesystem.rxFmtPat.match(fstruct)
-            if m:
-                if hasattr( self, 'pStk' ):
-                    fstruct = fstruct.format(**self.pStk)
-                else:
-                    L.error('Path "%s" seems to contain formatting pattern'
-                            ' but no path-formatting context being set at the'
-                            ' moment.'%fstruct )
-            with open(fstruct) as f:
-                fStrObj = yaml.load(f)
-        else:
-            fStrObj = yaml.load(fstruct)
-        fStrVer = fStrObj.get('version', '0.0')
-        if '0.0' != fStrVer:  # TODO: finer versions control
-            L.warning( "File structure version %s might be"
-                    " unsupported (file \"%s\")."%(fStrVer, fstruct.name \
-                            if hasattr(fstruct, 'name') else fstruct) )
-        fStrObj = fStrObj[fstructConf]
-        if not fStrObj:
-            raise RuntimeError("Empty file structure subtree description.")
-        if 'extends' in fStrObj.keys():
-            L.debug( ' ..loading base file structure description "%s"'%(fStrObj['extends']['path']) )
-            base = self.parse_fstruct( fStrObj['extends']['path']
-                                     , fStrObj['extends'].get('conf', 'default') )
-            fStrObj.pop('extends')  # wipe it out since it is not an FS entry
-            #base.update(fStrObj)
-            fStrObj = _TODO_recursive_dict_update( base, fStrObj )
-            #fStrObj = lamia.core.configuration.Stack([ base, fStrObj ])
-            # TODO: use it instead of hand-written direct update, once stack
-            # will support nested dictionaries
-        return dict(fStrObj)
+        def __enter__(self):
+            pass
+        def __exit__(self, excType, excValue, traceBack):
+            pass
 
-    def setup_rendering( self
-                       , templatesDirs
-                       , contexts
-                       , definitions=[]):
-        """
-        Overrides vanilla template-rendering set-up to support template paths
-        for template directories and context file paths. Side effects caused by
-        parent's method invocation are the same as in superclass.
-        If self.pStk was set prior to invocation, it might be used by templates
-        dir paths containing python-formatting placeholders (e.g. {foo}).
-        """
-        if hasattr(self, 'pStk'):
-            assert(type(templatesDirs) is list)
-            for n, p in enumerate(templatesDirs):
-                if lamia.core.filesystem.rxFmtPat.match(p):
-                    templatesDirs[n] = p.format(**self.pStk)
-            assert(type(contexts) is list)
-            for n, ctxPath in enumerate(contexts):
-                if type(ctxPath) is not str: continue
-                if lamia.core.filesystem.rxFmtPat.match(ctxPath):
-                    contexts[n] = ctxPath.format(**self.pStk)
-        super().setup_rendering( templatesDirs
-                               , contexts
-                               , definitions=definitions)
-        # We append interpolators set here to support path context
-        # ...
-
-    def _main( self
-             , outputDir=None
-             , fstruct=None
+    def deploy_subtree( self, outputDir, fstruct
              , fstructConf='default'
-             , contexts=[], definitions=[]
-             , pathContexts=[], pathDefinitions=[]
              , templatesDirs=[]
              , showDiff=False ):
         """
@@ -214,16 +187,33 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         Note: probably, pointless. We usually need to perform some operations in
         between of path template-rendering and generating the actual subtree.
         """
-        assert(outputDir)
-        assert(fstruct)
-        self.setup_path_templating( pathContexts, pathDefinitions )
-        fstruct = lamia.core.filesystem.Paths(self.parse_fstruct(
-                            fstruct, fstructConf ))
-        self.setup_rendering( templatesDirs, contexts, definitions )
-        self.t.deploy_fs_struct( outputDir
-                          , fstruct
-                          , self.pStk
-                          , templateContext=self.rStk )
+        # TODO: confirm created subtree removal on failure
+        with lamia.core.filesystem.FSSubtreeContext( parse_fstruct(fstruct, fstructConf, pathVariables=self.pStk),
+                                                     onFailure=None ) as fstruct \
+           , lamia.routines.render.TemplateEnvironment( [t.format(**self.pStk) for t in templatesDirs] ) as t:
+            t['templates'].deploy_fs_struct( outputDir, fstruct, self.pStk, templateContext=self.rStk )
+
+    def setup_contexts(self, contexts=[], definitions=[]
+             , pathContexts=[], pathDefinitions=[]
+             , templatesDirs=[]):
+        self.pStk = lamia.core.configuration.compose_stack(pathContexts, pathDefinitions)
+        contexts_ = [c.format(**self.pStk) if type(c) is str else c for c in contexts]
+        self.rStk = lamia.core.configuration.compose_stack(contexts_, definitions)
+
+    def _main( self, outputDir, fstruct
+             , fstructConf='default'
+             , contexts=[], definitions=[]
+             , pathContexts=[], pathDefinitions=[]
+             , templatesDirs=[]
+             , showDiff=False
+             , onFinish=None ):
+        self.setup_contexts( contexts=contexts, definitions=definitions
+                           , pathContexts=pathContexts, pathDefinitions=pathDefinitions
+                           , templatesDirs=templatesDirs )
+        self.deploy_subtree( outputDir, fstruct
+                           , fstructConf=fstructConf
+                           , templatesDirs=templatesDirs
+                           , showDiff=showDiff )
 #                               *** *** ***
 if "__main__" == __name__:
     lamia.logging.setup()
