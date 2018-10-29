@@ -491,13 +491,19 @@ def auto_path( p
     try:
         m = rxFmtPat.match(p)
     except:
-        L.error('While applying to %s'%str(p))
+        L.error('While applying auto_path() to "%s"'%str(p))
         raise
     if '@' == p[0]:
         if not fStruct:
             raise ValueError('Alias given, but no filesystem subtree object'
                     ' is provided. Can not affiliate the alias.' )
-        return fStruct(p[1:], requireComplete=requireComplete, **kwargs)
+        #if p[1:] not in fStruct and requireComplete:  #< XXX, not your business.
+        #    raise KeyError('File structure does not define alias "%s"'%p)
+        try:
+            return fStruct(p[1:], requireComplete=requireComplete, **kwargs)
+        except:
+            L.error('..during expansion of alias "%s".'%(p))
+            raise
     elif '{' in p:
         r = p.format_map(DictFormatWrapper( **dict(kwargs)
                     , requireComplete=requireComplete))

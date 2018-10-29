@@ -119,7 +119,7 @@ class Task(object):
         dfts = lamia.core.configuration.Stack( dfts if dfts else [] )
         self._p.set_defaults( **dfts )
         L.debug( 'Default values set for %s.'%(', '.join(
-            ['"%s"="%s"'%(k, str(v)) for k, v in dfts.items()])) )
+            ['%s="%s"'%(k, str(v)) for k, v in dfts.items()])) )
 
     def __init__(self):
         pass
@@ -163,7 +163,7 @@ def cumulative_class_property_getter(prop):
             # Invoke eponymous getter for all direct bases, if appliable,
             # in order.
             if hasattr(bCls, getterName):
-                st += getattr(bCls, 'get_%s'%prop)()
+                st += getattr(bCls, getterName)()
         attrName = '_%s__%s'%( cls.__name__, varName)
         # Append the list with own, of appliable
         if hasattr( cls, attrName ):
@@ -228,9 +228,9 @@ class TaskClass(type):
             clsname, ' '.join( '"%s"'%k for k in attributedict.keys() )))
         # Inject getters
         cumulativeGetters = ['common_parameters']
-        if not attributedict.pop('_%s__cumulativeDefaults'%cls.__name__, False):
-            attributedict['get_defaults'] = classmethod( lambda cls :
-                    getattr(cls, '_%s__defaults'%cls.__name__, {}) )
+        if not attributedict.pop('_%s__cumulativeDefaults'%clsname, False):
+            attributedict['get_defaults'] = classmethod( lambda cls_ :
+                    [getattr(cls_, '_%s__defaults'%cls_.__name__, {})] )
         else:
             cumulativeGetters.append('defaults')
             L.debug('Default values are set to be cumulative'
@@ -239,8 +239,8 @@ class TaskClass(type):
             attributedict['get_%s'%pN] = cumulative_class_property_getter( pN )
             attributedict['get_%s_names'%pN] \
                     = cumulative_class_property_keys_getter(pN)
-        attributedict['get_exec_parameters'] = classmethod( lambda cls :
-                getattr(cls, '_%s__execParameters'%cls.__name__, {}) )
+        attributedict['get_exec_parameters'] = classmethod( lambda cls_ :
+                [getattr(cls_, '_%s__execParameters'%cls_.__name__, {})] )
         # Produce class object
         L.debug("New task class derived: `%s'; superclasses: %s; dict: {%s}."%(
             clsname,
