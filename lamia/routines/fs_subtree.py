@@ -140,6 +140,17 @@ def parse_fstruct( fstruct, fstructConf='default'
         # will support nested dictionaries
     return dict(fStrObj)
 #                               *** *** ***
+def contxtual_path( fstruct, env ):
+    """
+    For given Paths() instance produces a shortcut function to
+    lamia.core.filesystem.auto_path(), relying on current `pStk'.
+    """
+    def _ap( v, requireComplete=True ):
+        return lamia.core.filesystem.auto_path(
+                v, fStruct=fstruct
+                , requireComplete=requireComplete, **env.pStk )
+    return _ap
+#                               *** *** ***
 class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
     """
     Stateful environment object for filesystem subtree deployment.
@@ -159,23 +170,14 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
         self._contexts = contexts
         self._ctxDefs = definitions
 
-    def autopath( self, fstruct ):
-        """
-        For given Paths() instance produces a shortcut function to
-        lamia.core.filesystem.auto_path(), relying on current `pStk'.
-        """
-        def _ap( v, requireComplete=True ):
-            return lamia.core.filesystem.auto_path(
-                    v, fStruct=fstruct
-                    , requireComplete=requireComplete, **self.pStk )
-        return _ap
-
     @property
     def rStk(self):
-        ctxs = self._contexts
-        if self._pathCtxs:
-            ctxs = [c.format(**self.pStk) if type(c) is str else c for c in self._contexts]
-        return lamia.core.configuration.compose_stack( ctxs, self._ctxDefs )
+        if not hasattr(self, '_rStk'):
+            ctxs = self._contexts
+            if self._pathCtxs:
+                ctxs = [c.format(**self.pStk) if type(c) is str else c for c in self._contexts]
+            self._rStk = lamia.core.configuration.compose_stack( ctxs, self._ctxDefs )
+        return self._rStk
 
     def set_path_templating( self, pathContexts, pathDefinitions=[] ):
         self._pathCtxs = pathContexts
@@ -184,8 +186,10 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
 
     @property
     def pStk(self):
-        return lamia.core.configuration.compose_stack( self._pathCtxs,
-                self._pathDefs )
+        if not hasattr(self, '_pStk'):
+            self._pStk = lamia.core.configuration.compose_stack( self._pathCtxs
+                                                               , self._pathDefs )
+        return self._pStk
 
     @property
     def t(self):
