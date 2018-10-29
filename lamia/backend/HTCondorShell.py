@@ -102,15 +102,15 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
         else:
             cad["userLog"] = self.condorSubmitArgs.pop('userLog').format(**self.macros())
         #
-        if self.nProcs > 1:
-            if 'environment' in cad:
-                assert(type(cad['environment'] is dict))
-                if 'HTCONDOR_JOBINDEX' in cad['environment']:
-                    L.error( "The `HTCONDOR_JOBINDEX' specified for the"
-                            " environment will be overriden." )
-            else:
-                cad['environment'] = {}
-            cad['environment']['HTCONDOR_JOBINDEX'] = '$(Process)'
+        if 'environment' in cad:
+            assert(type(cad['environment'] is dict))
+            if 'HTCONDOR_JOBINDEX' in cad['environment']:
+                L.error( "The `HTCONDOR_JOBINDEX' specified for the"
+                        " environment will be overriden." )
+        else:
+            cad['environment'] = {}
+        cad['environment']['HTCONDOR_JOBINDEX'] = '$(Process)' \
+                                            if self.nProcs else 'SINGLE'
         if len(self.tCmd) > 1:
             if not self.isImplicitArray:
                 cad["arguments"] = self.tCmd[1:]
