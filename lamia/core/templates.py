@@ -18,16 +18,24 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
+Templating system adapter for Lamia.
 
-import yaml, os, fnmatch, logging, datetime, copy
+Uses jinja2 as template-rendering framework to produce dynamic templates.
+"""
+
+
+import yaml, os, fnmatch, logging, datetime, copy, re
+#import jinja2schema  # TODO: 1-vars-infer
 import jinja2 as j2
 import jinja2.lexer, jinja2.ext
 import lamia.core.configuration as LC
 import lamia.core.filesystem as FS
 from enum import Enum
 
-# Template files extension.
-TEMPLT_FLS_PAT = '*.yaml'
+# Template files regex (any file, except hidden ones and swap files produced
+# by some editors/IDEs).
+rxTemplateFilePat = re.compile(r'^(?P<dir>.+\/)?(?P<filename>[^.~#]\w*)(?:\.(?P<extension>\w+))?$')
 # Default access mode for files created.
 DFTFMOD = 0o664
 
@@ -73,16 +81,13 @@ class Loader(j2.BaseLoader):
     """
     A custom template loader class for Lamia. Its templates are the YAML files
     and have to be treated correspondingly.
-
-    The `template' YAML document has to contain at least the `template' string
-    within, have the .yaml extension and be the valid YAML file.
     """
-    def _load_yaml_object(self, fPath):
+    def _load_yaml_object(self, fPath):  # XXX
         """
         Internal function performing loading the document. Called by
         _discover_templates() and has to return (content, modtime) tuple.
         """
-        L = logging.getLogger('lamia.templates')
+        L = logging.getLogger(__name__)
         with open(fPath) as f:
             try:
                 content = yaml.load(f)
@@ -99,24 +104,46 @@ class Loader(j2.BaseLoader):
                     return content, mt
         return None
 
-    def _discover_templates(self, templatesRoot, interpolators=None):
+    def _load_template_file(self, fPath):
+        L = logging.getLogger(__name__)
+        with open(fPath) as f:
+            tl = f.read()
+        return { 'template' : tl }
+
+    def _discover_templates( self, templatesRoot
+                           , interpolators=None
+                           , ignorePats=['*/README.md'] ):
         """
         Searches for valid Lamia's template documents by given path and loads
         them into returned dict.
         """
-        L = logging.getLogger('lamia.templates')
+        L = logging.getLogger(__name__)
         ret = {}
         for root, dirnames, filenames in os.walk(templatesRoot):
-            for filename in fnmatch.filter(filenames, TEMPLT_FLS_PAT):
-                fPath = os.path.join(root, filename)
-                yObj, mt = self._load_yaml_object( fPath )
-                if yObj is not None:
-                    tName = os.path.splitext(os.path.relpath( fPath, templatesRoot ))[0]
-                    L.debug('Loaded template "%s" from'
-                            ' file "%s" (%s)'%( tName, fPath
-                                              , datetime.datetime.fromtimestamp(mt)))
-                    ret[tName] = ( LC.Configuration(yObj, interpolators=interpolators)
-                                 , fPath, mt)
+            for mt in filter(lambda t : t[0], map( lambda f: (rxTemplateFilePat.match(f), f), filenames)):
+                gd = mt[0].groupdict()
+                fPath = os.path.join(root, mt[1])
+                if any(map(lambda pat: fnmatch.fnmatch(fPath, pat), ignorePats)):
+                    L.debug('File %s excluded by globing pattern(s).'%fPath)
+                    continue
+                tName = os.path.splitext(os.path.relpath( fPath, templatesRoot ))[0]
+                # If it is a .yaml file, try to consider it as our old-style
+                # template first:
+                if 'yaml' == gd['extension']:
+                    # TODO: remove this block once NA58 alignment-monitoring
+                    # will entirely switch to ordinary template format.
+                    yObj, mt = self._load_yaml_object( fPath )
+                    if yObj is not None:
+                        ret[tName] = ( LC.Configuration(yObj, interpolators=interpolators)
+                                     , fPath, mt)
+                        L.debug('Loaded template "%s" from'
+                                ' file "%s" (%s)'%( tName, fPath
+                                                  , datetime.datetime.fromtimestamp(mt)))
+                        continue
+                # Otherwise, perform usual loading
+                ret[tName] = ( { 'template' : self._load_template_file(fPath) }
+                               , fPath
+                               , os.path.getmtime(fPath) )
         return ret
 
     def __init__(self, templateDirs, interpolators=None):
@@ -127,7 +154,7 @@ class Loader(j2.BaseLoader):
         L = logging.getLogger('lamia.templates')
         if type(templateDirs) is str:
             self.templates = self._discover_templates( templateDirs
-                                                 , interpolators=interpolators )
+                                                     , interpolators=interpolators )
         elif type(templateDirs) is list:
             self.templates = {}
             for tD in templateDirs:
@@ -136,6 +163,20 @@ class Loader(j2.BaseLoader):
         else:
             raise TypeError( type(templateDirs) )
         L.info( '%d templates collected.'%(len(self.templates)) )
+
+    #TODO: 1-vars-infer
+    #def infer_template_variables(self):
+    #    L = logging.getLogger(__name__)
+    #    for k, v in self.templates.items():
+    #        try:
+    #            sch = jinja2schema.infer( v[0]['template'] )
+    #        except Exception as e:
+    #            L.error('Failed to infer variables from file "%s":'%v[1] )
+    #            L.exception(e)
+    #    # NOTE: in order to make this code to work, we have to override the
+    #    # template providers of jinja2schema and fool around the default
+    #    # settings. See:
+    #    #   https://github.com/aromanovich/jinja2schema/tree/master/jinja2schema/visitors
 
     def get_source(self, environment, template):
         """
@@ -221,6 +262,7 @@ class Templates(object):
                 , mode=Operation.GENERATE
                 , additionalFilters={}
                 , extensions=[] ):
+        L = logging.getLogger(__name__)
         self.mode = mode
         # Require target dir to be accessible and actually a dir (or a symlink
         # to dir)
@@ -234,6 +276,15 @@ class Templates(object):
         self.env = j2.Environment( loader=self.loader
                                  , undefined=j2.StrictUndefined
                                  , extensions=extensions )
+        #
+        # Guerilla patch:
+        def _get_inherited_template_XXX(_, ast):
+            return self.env.parse(self.env.loader.get_source(self.env, ast.template.value)[0])
+        L.info("Applying guerilla patch to `jinja2schema' package...")
+        jinja2schema.visitors.stmt.get_inherited_template = _get_inherited_template_XXX
+        L.debug("Infering the template variables.")
+        #self.loader.infer_template_variables()  # TODO: 1-vars-infer
+        #
         for k, fltr in additionalFilters.items():
             self.env.filters[k] = fltr
 
