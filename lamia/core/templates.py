@@ -108,7 +108,7 @@ class Loader(j2.BaseLoader):
         L = logging.getLogger(__name__)
         with open(fPath) as f:
             tl = f.read()
-        return { 'template' : tl }
+        return tl
 
     def _discover_templates( self, templatesRoot
                            , interpolators=None
@@ -280,8 +280,9 @@ class Templates(object):
         # Guerilla patch:
         def _get_inherited_template_XXX(_, ast):
             return self.env.parse(self.env.loader.get_source(self.env, ast.template.value)[0])
-        L.info("Applying guerilla patch to `jinja2schema' package...")
-        jinja2schema.visitors.stmt.get_inherited_template = _get_inherited_template_XXX
+        # TODO: 1-vars-infer
+        #L.info("Applying guerilla patch to `jinja2schema' package...")
+        #jinja2schema.visitors.stmt.get_inherited_template = _get_inherited_template_XXX
         L.debug("Infering the template variables.")
         #self.loader.infer_template_variables()  # TODO: 1-vars-infer
         #
@@ -293,11 +294,16 @@ class Templates(object):
         Renders template identified by templateName, making the
         substitutions acc. to kwargs.
         """
+        L = logging.getLogger(__name__)
         #cfg = self.loaderInterpolators['CFG'].dct
         #alb = self.loaderInterpolators['ALBK'].dct
-        t = self.env.get_template(templateName)
-        # TODO: put valiadation checks here?
-        return t.render( ctx=self.loaderInterpolators, **kwargs)
+        try:
+            t = self.env.get_template(templateName)
+            # TODO: put valiadation checks here?
+            return t.render( ctx=self.loaderInterpolators, **kwargs)
+        except:
+            L.error(' ..during rendering of template "%s"'%templateName )
+            raise
 
     def __getitem__(self, k):
         return self.loaderInterpolators[k]
