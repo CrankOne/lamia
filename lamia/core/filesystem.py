@@ -344,6 +344,18 @@ class Paths( collections.MutableMapping ):
     def __iter__(self):
         return iter(self._dStruct)
 
+    def paths_from_template(self, pt, requireComplete=True, **kwargs):
+        entries = []
+        relevantKeys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(pt)]))
+        for argsSubset in dict_product(**{k : _rv_value(kwargs, k, requireComplete=requireComplete) for k in relevantKeys}):
+            entries.append( pt.format_map( DictFormatWrapper( **dict(argsSubset)
+                                         , requireComplete=requireComplete)) )
+        if 1 == len(entries):
+            return entries[0]
+        else:
+            return entries
+
+
     def __call__(self, alias, requireComplete=True, **kwargs):
         """
         Returns rendered template string w.r.t. to given keyword arguments.
@@ -358,16 +370,9 @@ class Paths( collections.MutableMapping ):
                 ', '.join('"%s"'%str(a) for a in self._aliases.keys())
                 ) )
             raise
-        entries = []
-        relevantKeys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(pt)]))
-        for argsSubset in dict_product(**{k : _rv_value(kwargs, k, requireComplete=requireComplete) for k in relevantKeys}):
-            entries.append( pt.format_map( DictFormatWrapper( **dict(argsSubset)
-                                         , requireComplete=requireComplete)) )
-        if 1 == len(entries):
-            return entries[0]
-        else:
-            return entries
-
+        return self.paths_from_template( pt, requireComplete=requireComplete
+                                        , **kwargs )
+        
     def __str__(self):
         """
         Returns the rendered YAML text. Not actually the one that can be parsed
@@ -505,12 +510,17 @@ def auto_path( p
             L.error('..during expansion of alias "%s".'%(p))
             raise
     elif '{' in p:
-        r = p.format_map(DictFormatWrapper( **dict(kwargs)
-                    , requireComplete=requireComplete))
-        m = rxFmtPat.findall( r )
-        if m and requireComplete:
-            raise RuntimeError("Path template \"%s\" is incomplete within"
-                    " current context: \"%s\""%( p, r ))
+        if not fStruct:
+            r = p.format_map(DictFormatWrapper( **dict(kwargs)
+                        , requireComplete=requireComplete))
+            m = rxFmtPat.findall( r )
+            if m and requireComplete:
+                raise RuntimeError("Path template \"%s\" is incomplete within"
+                        " current context: \"%s\""%( p, r ))
+            return r
+        else:
+            r = fStruct.paths_from_template( p, requireComplete=requireComplete
+                                           , **kwargs )
         return r
     else:
         return p

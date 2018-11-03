@@ -114,7 +114,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
         if len(self.tCmd) > 1:
             if not self.isImplicitArray:
                 cad["arguments"] = self.tCmd[1:]
-                nProcs = 1
+                nProcs = self.nProcs
             else:
                 cad["arguments"], cad['queue'] = \
                         lamia.backend.interface.inject_placeholders(
@@ -189,6 +189,7 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         L = logging.getLogger(__name__)
         try:
             L.debug("Supplementary popen() arguments: %s."%str(j.pkw) )
+            L.debug("Submission command: $ %s"%(' '.join(j.cmd)))
             submJob = subprocess.Popen(j.cmd, **j.pkw)
             out, err = submJob.communicate( timeout=self.cfg['timeouts.condorSubmit'] )
             rc = submJob.returncode

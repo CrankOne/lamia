@@ -140,15 +140,24 @@ def parse_fstruct( fstruct, fstructConf='default'
         # will support nested dictionaries
     return dict(fStrObj)
 #                               *** *** ***
-def contxtual_path( fstruct, env ):
+def contxtual_path( fstruct, env, base=None ):
     """
     For given Paths() instance produces a shortcut function to
     lamia.core.filesystem.auto_path(), relying on current `pStk'.
     """
-    def _ap( v, requireComplete=True ):
-        return lamia.core.filesystem.auto_path(
+    def _ap( v, requireComplete=True, abspath=False ):
+        r = lamia.core.filesystem.auto_path(
                 v, fStruct=fstruct
                 , requireComplete=requireComplete, **env.pStk )
+        if abspath:
+            if type(r) is str:
+                r = os.path.abspath( r if base is None else os.path.join( base, r ) )
+            elif type(r) is list:
+                r = [ os.path.abspath(rr if base is None else os.path.join(base, rr) ) for rr in r ]
+            else:
+                raise ValueError( "Unable to get abspath from type %s"
+                    " instance."%type(r).__name__ )
+        return r
     return _ap
 #                               *** *** ***
 class DeploymentEnv(lamia.routines.render.TemplateEnvironment):

@@ -376,10 +376,12 @@ class Stack(collections.MutableMapping):
         self._stack.append( (tag, c) )
 
     def pop( self, tag=None ):
-        if tag is not None \
-        and self._stack[-1][0] is not None \
-        and self._stack[-1][0] != tag:
-            raise StackTagError( 'Has: %s, tried: %s.'%( self._stack[-1][0], tag) )
+        if (tag is not None \
+            and self._stack[-1][0] != tag) \
+        or (tag is None \
+            and self._stack[-1][0] is not None):
+            raise StackTagError( 'Configuration stack tag mismatch;'
+                ' has: %s, tried: %s.'%( self._stack[-1][0], tag) )
         self._stack.pop()
 
     def argparse_override(self, overrideExpr):

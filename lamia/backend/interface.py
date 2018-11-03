@@ -113,8 +113,7 @@ class Submission(abc.ABC):
         of >1 length, the submission has to be considered as an
         `implicit array' -- the bunch of parallel jobs steered by queue entry.
         """
-        return (not self.stdinTarget) \
-                and any([type(x) in (set, list, tuple) for x in self.tCmd])
+        return any([type(x) in (set, list, tuple) for x in self.tCmd])
 
     @property
     def jobName(self):
