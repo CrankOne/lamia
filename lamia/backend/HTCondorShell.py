@@ -101,6 +101,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
             cad["userLog"] = os.path.join( dn, fexec + '.htcondor-log')
         else:
             cad["userLog"] = self.condorSubmitArgs.pop('userLog').format(**self.macros())
+        self.userLog = cad['userLog']  # Save this value for further usage
         #
         if 'environment' in cad:
             assert(type(cad['environment'] is dict))
@@ -221,6 +222,10 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             ret = { 'jID' : [jidBgn, jidEnd] }
             L.info( 'Multiple HTCondor jobs submitted: %d.%d - %d.%d.'%(
                 jidBgn[0], jidBgn[1], jidEnd[0], jidEnd[1] ) )
+        if hasattr( j, 'userLog') and j.userLog:
+            ret['userLog'] = j.userLog
+        else:
+            L.warning('Job submission have no "userLog" attribute.')
         return ret
 
     def __init__(self, config):
@@ -297,8 +302,8 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         The util requires HTCondor log to query the status. Hence, we expect it
         be given within the jID dict.
         """
-        assert('jID' in jID[0])  # some job identifier tuple must be in dict
-        assert('userLog' in jID[1])  # 'userLog' must be in classAd dict
+        assert('jID' in jID)  # some job identifier tuple must be in dict
+        assert('userLog' in jID)  # 'userLog' must be in classAd dict
         L = logging.getLogger(__name__)
         nAttempt = 0
         cmd_ = [ self.cfg['execs.condorWait'] ]
@@ -307,13 +312,13 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         if intervalSecs:
             cmd_ += ['-wait', str(intervalSecs)]
         # ^^^ Signature: $ condor_wait [-wait intervalSecs] logFile [ClusterID.JobID]
-        cmd_ += [jID[1]['userLog']]
+        cmd_ += [jID['userLog']]
         # If jID object refers to job array (not a single clusterID.procID), we
         # have to wait for all of them (thus, not specifying this argument at
         # all).
-        if type(jID[0]['jID']) is tuple:
+        if type(jID['jID']) in (tuple, list):
             # this is a single job
-            cmd_ += ['%d.%d'%(jID[0]['jID'][0], jID[0]['jID'][1])]
+            cmd_ += ['%d.%d'%(jID['jID'][0], jID['jID'][1])]
         # Form popen() keyword arguments:
         pkw = copy.deepcopy({ 'stdout' : subprocess.PIPE
                             , 'stderr' : subprocess.PIPE
