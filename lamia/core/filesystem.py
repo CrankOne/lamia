@@ -124,7 +124,7 @@ def _rv_value(d, k, requireComplete=True):
     if r:
         return dpath.get(d, key, separator='.')
     elif not requireComplete:
-        return k
+        return '{%s}'%k  # NOTE: was `return k', check side effects
     else:
         raise KeyError(k)
 
