@@ -23,6 +23,7 @@ Filesystem tree creating routine.
 """
 #                               *** *** ***
 import os, sys, logging, argparse, yaml, collections, io
+import distutils.version
 import lamia.logging \
      , lamia.core.templates \
      , lamia.core.filesystem \
@@ -119,8 +120,8 @@ def parse_fstruct( fstruct, fstructConf='default'
             fStrObj = yaml.load(f)
     else:
         fStrObj = yaml.load(fstruct)
-    fStrVer = fStrObj.get('version', '0.0')
-    if '0.0' != fStrVer:  # TODO: finer versions control
+    fStrVer = distutils.version.LooseVersion('%s'%fStrObj.get('version', '0.0'))
+    if fStrVer > distutils.version.LooseVersion('0.1'):
         L.warning( "File structure version %s might be"
                 " unsupported (file \"%s\")."%(fStrVer, fstruct.name \
                         if hasattr(fstruct, 'name') else fstruct) )
@@ -146,9 +147,14 @@ def contxtual_path( fstruct, env, base=None ):
     lamia.core.filesystem.auto_path(), relying on current `pStk'.
     """
     def _ap( v, requireComplete=True, abspath=False ):
-        r = lamia.core.filesystem.auto_path(
-                v, fStruct=fstruct
-                , requireComplete=requireComplete, **env.pStk )
+        L = logging.getLogger(__name__)
+        try:
+            r = lamia.core.filesystem.auto_path(
+                    v, fStruct=fstruct
+                    , requireComplete=requireComplete, **env.pStk )
+        except:
+            L.error('..while interpolating path entity: %s'%str(v))
+            raise
         if abspath:
             if type(r) is str:
                 r = os.path.abspath( r if base is None else os.path.join( base, r ) )
@@ -219,12 +225,14 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
             self._memFiles[label] = io.StringIO()
         return self._memFiles[label]
 
-    def subtree(self, fstruct, fstructConf='default'):
+    def subtree(self, fstruct, fstructConf='default', pKey='__p', contextHooks={}):
         # { k : s.getvalue() for k, s in self._memFiles.items() }
         return lamia.core.filesystem.FSSubtreeContext(
                 parse_fstruct( fstruct, fstructConf
                              , pathVariables=self.pStk ),
-                onFailure=None )  #< TODO: on-failure confirm created subtree removal
+                onFailure=None,  #< TODO: on-failure confirm created subtree removal
+                pKey=pKey,
+                contextHooks=contextHooks)
 #                               *** *** ***
 class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
                        , metaclass=lamia.core.task.TaskClass ):

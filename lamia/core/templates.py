@@ -206,7 +206,7 @@ class _RecursiveTemplatesHandler(object):
         self.renderers = renderers
         self.mode = mode
 
-    def __call__( self, template, path=None, context={} ):
+    def __call__( self, template, path=None, context={}, contextHooks={} ):
         L = logging.getLogger('lamia.templates')
         L.debug( 'Rendering of %s.'%path )
         rTxt = None
@@ -218,17 +218,29 @@ class _RecursiveTemplatesHandler(object):
                 return
             rTxt = self.renderers['default'](template, **context)
         elif type(template) is dict:
+            ctxStk = LC.Stack(dict(context))
+            for ctxHookName in template.get('contextHooks', []):
+                ctxh = contextHooks[ctxHookName]
+                if callable(ctxh):
+                    # TODO: document context hooks technique
+                    v = ctxh( template, path, context )
+                else:
+                    v = ctxh
+                ctxStk.push(v, tag=ctxHookName)
             if 'id' in template.keys():
                 rTxt = self.renderers[template.get('class', 'default')]( template['id']
-                        , **context)
+                        , **ctxStk)
             elif 'class' in template.keys():
                 if template['class'] is not None:
                     rTxt = self.renderers[template.get('class', 'default')]( template
-                        , **context)
+                        , **ctxStk)
                 else:
                     return
                     # ^^^ The case of class: None has to remain possible, and
-                    # means ``just keep the file as it is''.
+                    # means ``just keep the file as it is''. TODO: similar to "@"
+            # TODO: reversed
+            #for ctxHookName in template.get('contextHooks', []):
+            #    ctxStk.pop(tag=ctxHookName)
         else:
             raise TypeError( 'Expected either a string identifying template'
                     ' or a dictionary with "class" field, not an instance of'
@@ -310,7 +322,8 @@ class Templates(object):
 
     def deploy_fs_struct( self, root, fs, pathTemplateArgs
                         , renderers={}
-                        , templateContext={} ):
+                        , templateContext={}
+                        , level=None ):
         """
         Performs deployment of filesystem structure subtree according to fiven
         subtree description and template-rendering context.
@@ -335,7 +348,8 @@ class Templates(object):
         fs.create_on( root
                 , pathCtx=pathTemplateArgs
                 , tContext=copy.deepcopy(templateContext)
-                , leafHandler=_RecursiveTemplatesHandler(renderers=renderers) )
+                , leafHandler=_RecursiveTemplatesHandler(renderers=renderers)
+                , level=level )
 
 def render_string( strTmpl, _additionalFilters={}, _extensions=[], **kwargs ):
     """
