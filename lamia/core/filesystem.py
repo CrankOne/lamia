@@ -82,6 +82,7 @@ def dict_product(**kwargs):
     L = logging.getLogger(__name__)
     scalars = {}
     sequences = {}
+    callables = {}
     for k, v in kwargs.items():
         if _is_seq(v):
             sequences[k] = v
@@ -92,6 +93,8 @@ def dict_product(**kwargs):
                         " yet supported.")  # TODO
         elif type(v) in (bool, int, float, str):
             scalars[k] = v
+        elif callable(v):
+            callables[k] = v
         else:
             raise TypeError('%s: %s'%(k, type(v).__name__))
     keys = sequences.keys()
@@ -99,7 +102,14 @@ def dict_product(**kwargs):
     for instance in itertools.product(*vals):
         dct = dict(zip(keys, instance))
         dct.update(scalars)
-        yield dct
+        if not callables:
+            yield dct
+        else:
+            callableAppendix = {}
+            for ck, c in callables.items():
+                callableAppendix[k] = c(dct)
+            dct.update(callableAppendix)
+            yield from dict_product(**dct)
 
 # This strightforward inplementation seems legit, but needs more checks
 # against Python's conventions within complex keys indexing.
@@ -142,7 +152,9 @@ def render_path_templates(*args, requireComplete=True, **kwargs):
     s = os.path.join(*args)
     keys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)]))
     try:
-        for skwargs in dict_product(**{ k : _rv_value(kwargs, k, requireComplete=requireComplete) for k in keys }):
+        for skwargs in dict_product(**{
+                k : _rv_value(kwargs, k, requireComplete=requireComplete) \
+                        for k in keys }):
             dfw = DictFormatWrapper( **dict(skwargs)
                                    , requireComplete=requireComplete )
             try:
@@ -299,11 +311,17 @@ class Paths( collections.MutableMapping ):
             self._aliases[alias] = os.path.join(*path, nm)
         return nm, v
 
-    def __init__(self, initObject):
+    def __init__(self, initObject, pKey='__p', contextHooks={}):
+        """
+        Templates may refer to volatile path-rendering context entities with
+        name given by `pKey'.
+        """
         self._aliases = {}
         self._files = {}
         self._visited = None
+        self._pKey = pKey
         self._dStruct = self._treat_expression( initObject )
+        self.contextHooks = contextHooks
 
     def __getitem__(self, key):
         return dpath.util.get( self._dStruct, key )
@@ -372,7 +390,6 @@ class Paths( collections.MutableMapping ):
             raise
         return self.paths_from_template( pt, requireComplete=requireComplete
                                         , **kwargs )
-        
     def __str__(self):
         """
         Returns the rendered YAML text. Not actually the one that can be parsed
@@ -433,14 +450,12 @@ class Paths( collections.MutableMapping ):
                 # Apply the appropriate handler to generate the leaf node.
                 try:
                     L.debug( 'handling the "%s"', p )
-                    # The pathCtx will be available within the
-                    # template as well.
                     context = copy.deepcopy( tContext )
-                    if '__p' in context.keys():
-                        L.warning( 'The "__p" is already in'
-                                ' template\'s context. Preserving it.' )
+                    if self._pKey in context.keys():
+                        L.warning( 'The "%s" is already in'
+                            ' template\'s context. Preserving it.'%self._pKey )
                     else:
-                        context['__p'] = pathCtx
+                        context[self._pKey] = pathCtx
                     if 'paths' in context.keys():
                         L.warning( 'The "paths" is already in'
                                 ' template\'s context. Preserving it.' )
@@ -448,10 +463,11 @@ class Paths( collections.MutableMapping ):
                         context['paths'] = self
                     leafHandler( self._files[templatePath]
                                , path=p
-                               , context=context )
+                               , context=context
+                               , contextHooks=self.contextHooks )
                 except:
-                    L.error( 'During handler invokation for node: %s'
-                           , p )
+                    L.error( 'During template-rendering handler invocation'
+                            ' for node: %s', p )
                     raise
                 finally:
                     if isinstance( pathCtx, lamia.core.configuration.Stack ):
@@ -460,18 +476,20 @@ class Paths( collections.MutableMapping ):
     def create_on( self, root
                  , pathCtx={}
                  , tContext={}
-                 , leafHandler=None ):
+                 , leafHandler=None
+                 , level=None ):
         """
         Entry point for in-dir subtree creation.
             @root is a base dir where the subtree must start
             @tContext is a file template context
             @pathCtx is a secial path-rendering context
             @leafHandler is file-template rendering object
+            @level might be used to deploy only certain branch (TODO: untested)
         Internally, delegates execution to private _generate() method starting
         a recursive process of template rendering.
         """
         self._visited = set()
-        self._generate( root, [], self
+        self._generate( root, [], self if level is None else dpath.util.get(self, level)
                 , pathCtx=pathCtx
                 , tContext=tContext
                 , leafHandler=leafHandler )
@@ -530,11 +548,11 @@ class FSSubtreeContext(object):
     """
     With-statement context for file structure.
     """
-    def __init__(self, fsManifest, pathDefinitions={}, onFailure=None):
+    def __init__(self, fsManifest, pathDefinitions={}, onFailure=None, pKey='__p', contextHooks={}):
         """
         Will construct file structure (if it is not yet being done).
         """
-        self._fstruct = Paths(fsManifest)
+        self._fstruct = Paths(fsManifest, pKey=pKey, contextHooks=contextHooks)
         self._onFailure = onFailure
 
     def __enter__(self):
