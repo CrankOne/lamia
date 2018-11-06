@@ -362,19 +362,23 @@ class Paths( collections.MutableMapping ):
     def __iter__(self):
         return iter(self._dStruct)
 
-    def paths_from_template(self, pt, requireComplete=True, **kwargs):
+    def paths_from_template(self, pt, requireComplete=True, reflexive=False, **kwargs):
         entries = []
         relevantKeys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(pt)]))
         for argsSubset in dict_product(**{k : _rv_value(kwargs, k, requireComplete=requireComplete) for k in relevantKeys}):
-            entries.append( pt.format_map( DictFormatWrapper( **dict(argsSubset)
-                                         , requireComplete=requireComplete)) )
+            entry = pt.format_map( DictFormatWrapper( **dict(argsSubset)
+                                            , requireComplete=requireComplete )
+                                 )
+            if reflexive:
+                entry = ( entry, argsSubset )
+            entries.append( entry )
         if 1 == len(entries):
             return entries[0]
         else:
             return entries
 
 
-    def __call__(self, alias, requireComplete=True, **kwargs):
+    def __call__(self, alias, requireComplete=True, reflexive=False, **kwargs):
         """
         Returns rendered template string w.r.t. to given keyword arguments.
         """
@@ -388,8 +392,10 @@ class Paths( collections.MutableMapping ):
                 ', '.join('"%s"'%str(a) for a in self._aliases.keys())
                 ) )
             raise
-        return self.paths_from_template( pt, requireComplete=requireComplete
-                                        , **kwargs )
+        return self.paths_from_template( pt
+                                       , requireComplete=requireComplete
+                                       , reflexive=reflexive
+                                       , **kwargs )
     def __str__(self):
         """
         Returns the rendered YAML text. Not actually the one that can be parsed
@@ -498,7 +504,8 @@ class Paths( collections.MutableMapping ):
 def auto_path( p
              , fStruct=None
              , requireComplete=True
-             , **kwargs ):
+             , reflexive=False
+             , **kwargs ):  # TODO: since we have kws here, **kwargs -> pathVars
     """
     `p' must be a string identifying the path in a following manner:
         - if it starts with `@' sign, the rest of the `p' content will be
@@ -523,25 +530,32 @@ def auto_path( p
         #if p[1:] not in fStruct and requireComplete:  #< XXX, not your business.
         #    raise KeyError('File structure does not define alias "%s"'%p)
         try:
-            return fStruct(p[1:], requireComplete=requireComplete, **kwargs)
+            return fStruct(p[1:], requireComplete=requireComplete,
+                    reflexive=reflexive, **kwargs)
         except:
             L.error('..during expansion of alias "%s".'%(p))
             raise
     elif '{' in p:
         if not fStruct:
             r = p.format_map(DictFormatWrapper( **dict(kwargs)
-                        , requireComplete=requireComplete))
+                        , requireComplete=requireComplete ))
             m = rxFmtPat.findall( r )
             if m and requireComplete:
                 raise RuntimeError("Path template \"%s\" is incomplete within"
                         " current context: \"%s\""%( p, r ))
-            return r
+            if not reflexive:
+                return r
+            else:
+                return (r, dict(kwargs))  # TODO: filter keys?
         else:
-            r = fStruct.paths_from_template( p, requireComplete=requireComplete
+            return fStruct.paths_from_template( p, requireComplete=requireComplete
+                                           , reflexive=reflexive
                                            , **kwargs )
-        return r
     else:
-        return p
+        if not reflexive:
+            return p
+        else:
+            return (p, {})
 
 
 class FSSubtreeContext(object):

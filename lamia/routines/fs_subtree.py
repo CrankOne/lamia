@@ -146,23 +146,46 @@ def contxtual_path( fstruct, env, base=None ):
     For given Paths() instance produces a shortcut function to
     lamia.core.filesystem.auto_path(), relying on current `pStk'.
     """
-    def _ap( v, requireComplete=True, abspath=False ):
+    def _ap( v, requireComplete=True, abspath=False, reflexive=False ):
         L = logging.getLogger(__name__)
         try:
             r = lamia.core.filesystem.auto_path(
                     v, fStruct=fstruct
-                    , requireComplete=requireComplete, **env.pStk )
+                    , requireComplete=requireComplete
+                    , reflexive=reflexive
+                    , **env.pStk )
         except:
             L.error('..while interpolating path entity: %s'%str(v))
             raise
         if abspath:
-            if type(r) is str:
-                r = os.path.abspath( r if base is None else os.path.join( base, r ) )
-            elif type(r) is list:
-                r = [ os.path.abspath(rr if base is None else os.path.join(base, rr) ) for rr in r ]
+            if not reflexive:
+                # Non-reflexive mode: the auto_path() returns either string,
+                # or list of strings
+                if type(r) is str:
+                    r = os.path.abspath( r if base is None else os.path.join( base, r ) )
+                elif type(pt) is list:
+                    r = [ os.path.abspath( rr if base is None else os.path.join(base, rr) ) for rr in r ]
+                else:
+                    raise ValueError( "Unable to get abspath from %s type "
+                        " instance."%type(pt).__name__ )
             else:
-                raise ValueError( "Unable to get abspath from type %s"
-                    " instance."%type(r).__name__ )
+                # Reflexive mode: the auto_path() returns either tuple
+                # (string, dict) or list of tuples [(string, dict) ...]
+                if type(r) is tuple:
+                    r = ( os.path.abspath( r[0] if base is None else os.path.join( base, r[0] ) )
+                        , r[1] )
+                elif type(r) in (list, tuple):
+                    rr = []
+                    for entry in r:
+                        if base is None:
+                            pt = entry[0]
+                        else:
+                            pt = os.path.join(base, entry[0])
+                        rr.append( (os.path.abspath(pt), entry[1]) )
+                    r = rr
+                else:
+                    raise ValueError( "Unable to get abspath from %s type "
+                        " instance."%type(pt).__name__ )
         return r
     return _ap
 #                               *** *** ***
