@@ -30,6 +30,10 @@ rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@/\n]+)(?:@(?P<alias>[_\-\w]+))?$'
 rxFSStruct = re.compile(rxsFSStruct)
 rxFmtPat = re.compile(r'\{[^}\s]+\}')
 
+# By default, templates may refer to current Path object instance by this
+# key.
+DFT_PATH_KEY='__p'
+
 #
 # Exceptions
 
@@ -269,6 +273,50 @@ class DictFormatWrapper(dict):
         else:
             return '{%s}'%key
 
+class PathsDeployment(object):
+    """
+    Stores information about filesystem entries being visited, created,
+    updated, etc. Used to inspect the ongoing process and to clean-up the
+    entities just being created in case of something goes wrong.
+    """
+    def __init__(self, root ):
+        # list of path (as strings) being visited
+        self.visited = set()
+        # filesystem subtree dict-like tree of entities being created
+        self.created = dict()
+        # current list of path tokens, stacked during recursive traversal
+        self.path = []
+        # base directory for deployment (filesystem subtree prefix)
+        self.root = root
+        assert(type(self.root) in (str, tuple, list))
+
+    def push(self, dirName):
+        self.path.append( dirName )
+
+    def pop(self, expectedName=None):
+        if expectedName is not None \
+        and expectedName != self.path[-1]:
+            raise AssertionError('Expected path token on top: "%s","
+                    " real is "%s".'%(expectedName, self.path[-1]) )
+        return self.pop()
+
+    def current_path(self, full=False, asString=False):
+        """
+        Returns current path stack.
+        """
+        ret = self.path
+        if full:
+            if type(self.root) is str:
+                ret.insert( 0, self.root )
+            elif type(self.root) in (tuple, list):
+                ret = list(self.root) + ret
+        if asString:
+            ret = os.path.join(*ret)
+        return ret
+
+    #def add_visited( self, token ):
+    #    self.vivited.add( os.path. )
+
 class Paths( collections.MutableMapping ):
     """
     A file structure subtree representation.
@@ -286,7 +334,7 @@ class Paths( collections.MutableMapping ):
         return ret
 
     def _new_entry_at( self, path, templatedName, value ):
-        L = logging.getLogger('lamia.filesystem')
+        L = logging.getLogger(__name__)
         m = rxFSStruct.match( templatedName )
         v = None
         if not m:
@@ -311,14 +359,13 @@ class Paths( collections.MutableMapping ):
             self._aliases[alias] = os.path.join(*path, nm)
         return nm, v
 
-    def __init__(self, initObject, pKey='__p', contextHooks={}):
+    def __init__(self, initObject, pKey=DFT_PATH_KEY, contextHooks={}):
         """
         Templates may refer to volatile path-rendering context entities with
         name given by `pKey'.
         """
         self._aliases = {}
         self._files = {}
-        self._visited = None
         self._pKey = pKey
         self._dStruct = self._treat_expression( initObject )
         self.contextHooks = contextHooks
@@ -406,7 +453,8 @@ class Paths( collections.MutableMapping ):
                           }
             , indent=1 )
 
-    def _generate( self, root, path, fs
+    def _generate( self, fs
+                 , createdRef=None
                  , pathCtx={}
                  , leafHandler=None
                  , tContext={} ):
@@ -414,19 +462,21 @@ class Paths( collections.MutableMapping ):
         Generates the particular node (file or directory) recursively.
         """
         L = logging.getLogger('lamia.filesystem')
+        assert(createdRef)
         for k, v in fs.items():
-            np = path + [k]
+            createdRef.push(k)
             if type(v) is dict:
-                self._generate( root, np, v, pathCtx=pathCtx
-                    , leafHandler=leafHandler, tContext=tContext )
+                self._generate( v, pathCtx=pathCtx
+                    , leafHandler=leafHandler, tContext=tContext
+                    , createdRef=createdRef )
             if not leafHandler:
                 continue
-            for p, pathContext in render_path_templates( *([root] + np)
+            for p, pathContext in render_path_templates( *createdRef.current_path(full=True)
                                                        , requireComplete=True
                                                        , **pathCtx ):
-                templatePath = os.path.join(*np)
-                if p not in self._visited:
-                    self._visited.add(p)
+                templatePath = createdRef.current_path(full=False, asString=True)
+                if p not in createdRef.visited:
+                    createdRef.visited.add(p)
                 else:
                     L.debug( 'Omitting visited path %s.', p )
                     continue
@@ -435,9 +485,9 @@ class Paths( collections.MutableMapping ):
                     continue
                 dirPath, filename = os.path.split(p)
                 check_dir( dirPath )
-                if dirPath not in self._visited:
+                if dirPath not in createdRef.visited:
                     check_dir( dirPath )
-                    self._visited.add(dirPath)
+                    createdRef.visited.add(dirPath)
                 # Update the pathCtx with pathContext here
                 if isinstance( pathCtx, lamia.core.configuration.Stack ):
                     pathCtx.push( pathContext
@@ -468,7 +518,7 @@ class Paths( collections.MutableMapping ):
                     else:
                         context['paths'] = self
                     leafHandler( self._files[templatePath]
-                               , path=p
+                               , path=createdRef.path
                                , context=context
                                , contextHooks=self.contextHooks )
                 except:
@@ -478,12 +528,14 @@ class Paths( collections.MutableMapping ):
                 finally:
                     if isinstance( pathCtx, lamia.core.configuration.Stack ):
                         pathCtx.pop( tag='recursive-path-subst' )
+            createdRef.pop(k)
 
     def create_on( self, root
                  , pathCtx={}
                  , tContext={}
                  , leafHandler=None
-                 , level=None ):
+                 , level=None
+                 , createdRef=None ):
         """
         Entry point for in-dir subtree creation.
             @root is a base dir where the subtree must start
@@ -494,12 +546,13 @@ class Paths( collections.MutableMapping ):
         Internally, delegates execution to private _generate() method starting
         a recursive process of template rendering.
         """
-        self._visited = set()
-        self._generate( root, [], self if level is None else dpath.util.get(self, level)
+        if createdRef is None:
+            createdRef = PathsDeployment( root )
+        self._generate( self if level is None else dpath.util.get(self, level)
                 , pathCtx=pathCtx
                 , tContext=tContext
-                , leafHandler=leafHandler )
-        self._visited = None
+                , leafHandler=leafHandler
+                , createdRef=createdRef )
 
 def auto_path( p
              , fStruct=None
@@ -562,7 +615,8 @@ class FSSubtreeContext(object):
     """
     With-statement context for file structure.
     """
-    def __init__(self, fsManifest, pathDefinitions={}, onFailure=None, pKey='__p', contextHooks={}):
+    def __init__( self, fsManifest, pathDefinitions={}
+                , onFailure=None, pKey=DFT_PATH_KEY, contextHooks={}):
         """
         Will construct file structure (if it is not yet being done).
         """
