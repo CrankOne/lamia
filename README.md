@@ -35,3 +35,27 @@ structures and higly-volatile configs/text files, etc. The Lamia offers a
 generalized way to provide dynamic execution context for them by customizing
 the local filesystem subtree with templated approach.
 
+
+# Templates
+
+...
+
+# Filesystem
+
+## Reserved context definitions
+
+The special variable `LAMIA` defined during context-rendering procedure have
+few sections that reflects volatile run-time conditions, specific for
+particular file instance:
+
+    * `LAMIA.path` is the path of file currently being rendered
+    * `LAMIA.pathContext` is the subset of variables interpolated by path
+currently being rendered. For example, if path was `options{iteration}.txt` and
+`iteration` was set to `[1, 2, 3]`, the `LAMIA.pathContext.iteration` will
+refer to particular value of `{iteration}`: `1` for `options1.txt`, `2` for
+`options2.txt`, etc.
+    * `LAMIA.subtree` refers to the subtree object being currenlty rendered.
+This object is an instance of `lamia.core.filesystem.Paths`. It might be used
+to retrieve the aliased paths from within a template rendering context.
+(TODO: shall we? custom filter have to be enough)
+

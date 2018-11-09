@@ -22,17 +22,17 @@
 Various auxilliary filesystem routines, coming in hand for lamia procedures.
 """
 import os, sys, errno, collections, re, dpath, yaml, itertools, logging, copy \
-     , glob, contextlib, argparse
-import lamia.core.interpolation, lamia.core.configuration
+     , glob, contextlib, argparse, io, bidict
+import lamia.core.interpolation, lamia.core.configuration, lamia.confirm
+from enum import Enum
 from string import Formatter
 
 rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@/\n]+)(?:@(?P<alias>[_\-\w]+))?$'
 rxFSStruct = re.compile(rxsFSStruct)
 rxFmtPat = re.compile(r'\{[^}\s]+\}')
 
-# By default, templates may refer to current Path object instance by this
-# key.
-DFT_PATH_KEY='__p'
+# Default access mode for files created.
+DFTFMOD = 0o664  # TODO: use
 
 #
 # Exceptions
@@ -274,13 +274,160 @@ class DictFormatWrapper(dict):
         else:
             return '{%s}'%key
 
+class FileHandlerContextManager(object):
+    """
+    Context manager tracking the created file instances.
+    """
+
+    def __init__( self, path, createdRef, globContextRef, locContextRef
+                , subtree, creationMode=None, alias=None ):
+        assert(isinstance(globContextRef, lamia.core.configuration.Stack))
+        self.createdRef = createdRef
+        self.gCtxRef = globContextRef
+        self.lCtxRef = locContextRef
+        self._path = path
+        self._subtree = subtree
+        self._file = None
+        self._creationMode = creationMode
+        self._alias = alias
+
+    def __enter__(self):
+        self.gCtxRef.push(
+                { 'LAMIA' : {
+                    'path' : self._path,  # (former ?)
+                    'pathContext' : self.lCtxRef,  # (former __p)
+                    'subtree' : self._subtree  # (former paths)
+                    }
+                } , tag='runtime-path-vars' )
+        # Take care of the entites that are not presented in current
+        # context within the runtime stack (explicitly mark them as
+        # deleted) since path context shall contain ONLY the keys
+        # consumed within current path.
+        #for pathKey in self.gCtxRef.keys():
+        #    if pathKey not in self.lCtxRef.keys():
+        #        del self.gCtxRef[pathKey]
+        # ^^^ TODO: do we really need that? The mutation happens within topmost
+        # conf of the Stack (when it is a Stack), so changes will be denied by
+        # pop() except for case of nested dicts/lists
+        assert(self._file is None)
+        self._file = io.StringIO()
+        return self.gCtxRef, self._file
+
+    def write_rendered(self):
+        L = logging.getLogger(__name__)
+        dirPath, filename = os.path.split(self._path)
+        # NOTE: this assure may take place before parent dir will be created.
+        # In this case, when parent dir(s) have aliases, the won't be indexed
+        # as instantiated alis. Despito of this, when the subsequnet assure..()
+        # will happen, the missed aliased dirs will be injected, though.
+        self.createdRef.assure_dir_exists( dirPath, self.lCtxRef )
+        if os.path.exists( self._path ):
+            while not self.createdRef.mode == PathsDeployment.Operation.OVERWRITE:
+                uChs = lamia.confirm.ask_for_variants( 'File "%s" exists.'%self._path, {
+                        'O' : 'overwrite',
+                        'd' : 'show diff',
+                        'A' : 'overwrite all',
+                        'c' : 'cancel deployment procedure and exit',
+                        's' : 'keep this file intact',
+                        'e' : 'cancel subtree deployment, but explore all the diffs'
+                    }, default='c' )
+                if 'A' == uChs:
+                    self.createdRef.mode = PathsDeployment.Operation.OVERWRITE
+                elif 'd' == uChs:
+                    self.show_file_diff()  # continues the loop
+                elif 'O' == uChs:
+                    break
+                elif 'c' == uChs:
+                    raise RuntimeError('Deployment cancelled due to'
+                            ' file collision: "%s".'%self._path )
+                elif 's' == uChs:
+                    L.info('File "%s" kept intact.'%self._path)
+                    return False  # `no-file-created' exit
+                elif 'e' == uChs:
+                    L.info('File "%s" kept intact. Resuming in'
+                            ' display-diff mode.'%self._path)
+                    self.createdRef.mode = PathsDeployment.Operation.EXTRACT_DIFFS
+                    self.show_file_diff()
+                    return False  # `no-file-created' exit
+        with open(self._path, 'w') as f:
+            f.write(self._file.getvalue())
+        if self._creationMode:
+            os.chmod( self._path, self._creationMode )
+        if self._alias:
+            self.createdRef.alias_instantiated( self._alias, self._path, self.lCtxRef )
+        return True
+
+    def show_file_diff(self):
+        if not os.path.exists(self._path):
+            L.info( 'New file "%s" to be created.'%self._path )
+            # ______ BEGIN of detectors.dat diff log ______ ???
+            raise NotImplementedError('Do something with the new file content.')
+        else:
+            raise NotImplementedError('Show file diff.')
+
+    def __exit__(self, excType, excValue, traceBack):
+        L = logging.getLogger(__name__)
+        self.gCtxRef.pop( tag='runtime-path-vars' )
+        if excType is None:
+            cl = len(self._file.getvalue())
+            L.debug( 'Rendered content for "{path}" of size {size}.'.format(
+                path=self._path, size=cl) )
+            if PathsDeployment.Operation.GENERATE == self.createdRef.mode \
+            or PathsDeployment.Operation.OVERWRITE == self.createdRef.mode :
+                if self.write_rendered():
+                    self.createdRef.add_created_file(self._path, self.lCtxRef)
+                    L.info( ' .."{path}" of {size} bytes'.format(
+                        path=self._path, size=cl) )
+            elif PathsDeployment.Operation.EXTRACT_DIFFS:
+                self.show_file_diff()
+        else:
+            L.error( 'Failed to render content for "%s".'%self._path )
+        #self._file.close()
+
 class PathsDeployment(object):
     """
     Stores information about filesystem entries being visited, created,
     updated, etc. Used to inspect the ongoing process and to clean-up the
     entities just being created in case of something goes wrong.
+    The instances are not reentrant and have to be re-created on re-deployment.
     """
-    def __init__(self, root ):
+    class Operation(Enum):
+        OVERWRITE = 0x1
+        GENERATE = 0x2
+        EXTRACT_DIFFS = 0x4
+
+    @staticmethod
+    def alias_for( aliases, **kwargs ):
+        """
+        A recursive picker for aliases, choosen by some criteria. Useful to
+        filter out aliases by context variables.
+        For practical usage one might be interested rather in
+        closure-generating alias_query() static method.
+        """
+        if not kwargs: return aliases
+        kw = next(iter(kwargs.keys()))
+        v = kwargs.pop(kw)
+        als = filter( lambda e: kw in e[1] and v == e[1][kw], aliases )
+        return PathsDeployment.alias_for(als, **kwargs)
+
+    @staticmethod
+    def alias_query( aliases ):
+        """
+        One may easily instantiate a simple filtering getter on the set of
+        aliases. Example
+            q = PathsDeployment.alias_query( myAliases )
+            q('logs', runID=12, iterNo=21)
+        """
+        def _alias_query_concrete(nm, **kwargs):
+            return PathsDeployment.alias_for( aliases[nm], **kwargs )
+        return _alias_query_concrete
+
+    def __init__(self, root, subtree, mode=Operation.GENERATE ):
+        """
+        Creates the new deployment object. The `root' is required to be a
+        string path pointing to the base directory, where the subtree has to
+        be deployed.
+        """
         assert(type(root) is str)
         # list of path (as strings) being visited
         self.visited = set()
@@ -290,11 +437,20 @@ class PathsDeployment(object):
         self._path = []
         # base directory for deployment (filesystem subtree prefix)
         self.root = os.path.realpath( root )
+        # Reference to currently processed subtree
+        self._subtree = subtree
+        # What to do with content obtained by rendering of the templates
+        self.mode = mode
+        # Collection of instantiated aliased entries. Dict has form
+        # <aliasName> : [( <path>, <context> ), ...]
+        self.instdAliases = {}
 
     def push(self, dirName):
+        """ Appends the stack of current path tokens. """
         self._path.append( dirName )
 
     def pop(self, expectedName=None):
+        """ Removes the last token from path tokens stack. """
         if expectedName is not None \
         and expectedName != self._path[-1]:
             raise AssertionError('Expected path token on top: "%s",'
@@ -303,18 +459,25 @@ class PathsDeployment(object):
 
     @property
     def path(self):
+        """
+        Returns a copy of current path tokens, without a base (root) dir.
+        """
         return copy.copy(self._path)
 
     def current_path(self, full=False, asString=False):
         """
-        Returns current path stack.
+        An advanced method for retrieving current path stack: with or without
+        root dir, whether or not to be merged into the string path.
         """
+        # Get the copy of current stack
         ret = self.path
+        # If `full' is requested, prepend with root
         if full:
             if type(self.root) is str:
                 ret.insert( 0, self.root )
             elif type(self.root) in (tuple, list):
                 ret = list(self.root) + ret
+        # If string form is requested, use os.path.join() to merge a list
         if asString:
             return os.path.join(*ret)
         else:
@@ -342,12 +505,77 @@ class PathsDeployment(object):
                     ' of "{root}".'.format( prefix=cmPrfx, locPt=pt, root=self.root ))
         return relPath
 
-    def assure_dir_exists( self, dp, pathCtx ):
-        if check_dir( dp ):
-            dpath.util.new( self._created, dp, {} )  # TODO: pathCtx
+    def assure_dir_exists( self, dp, pathCtx={}, alias=None ):
+        """
+        Recursively creates directory by given path. Absolute path is required
+        to start from self.root. Relative path will be considered from
+        self.root.
+        """
+        L = logging.getLogger(__name__)
+        assert( os.path.isabs(self.root) )
+        if os.path.isabs(dp):
+            assert( self.root == os.path.commonprefix([self.root, dp]) )
+            relPath = self.normalized_relative_path(dp)
+        else:
+            relPath = dp
+        # Fill path tokens list (will contain somewhat reversed form, i.e.:
+        # foo/bar/zum -> [zum, bar, foo]
+        ptoks = []
+        pt = relPath
+        while pt:
+            pt, tok = os.path.split(pt)
+            ptoks.append(tok)
+        c = [self.root]
+        for dp in reversed(ptoks):
+            c.append(dp)
+            jp = os.path.join(*c)
+            if os.path.isdir(jp):
+                continue
+            os.mkdir(jp)
+            cRelPath = os.path.relpath(jp, start=self.root)
+            assert(cRelPath not in self._created)
+            self._created[cRelPath] = pathCtx
+            L.debug('Dir "%s" created.'%cRelPath )
+        if alias:
+            self.alias_instantiated( alias, os.path.join(self.root, relPath), pathCtx )
 
-    def add_created_file(self, fp, pathCtx ):
-        dpath.util.new( self._created, self.normalized_relative_path(fp), {} )  # TODO: pathCtx
+    def add_created_file(self, fp, pathCtx={} ):
+        L = logging.getLogger(__name__)
+        dirPath, _ = os.path.split( fp )
+        self.assure_dir_exists( dirPath, pathCtx )
+        nrp = self.normalized_relative_path(fp)
+        self._created[nrp] = pathCtx
+        L.debug('File "%s" created.'%nrp )
+
+    def handle_file(self, path, globPathCtx, locPathCtx, mode=None, alias=None):
+        mgr = FileHandlerContextManager( path, self, globPathCtx,
+                locPathCtx, self._subtree, creationMode=mode, alias=alias)
+        return mgr
+
+    def clean_created(self):
+        L = logging.getLogger(__name__)
+        for p in reversed(self._created.keys()):
+            try:
+                if os.path.isdir(p):
+                    os.rmdir(p)
+                    L.debug('Dir "%s" deleted.'%p)
+                elif os.path.exists(p):
+                    os.remove(p)
+                    L.debug('File "%s" deleted.'%p)
+            except Exception as e:
+                L.error('Was unable to delete entity "%s". Exception:'%p )
+                L.exception(e)
+                # no re-raise, since we usually delete the fs within exception
+                # handler and raising another exception will broke the cleaning
+                # process
+
+    def alias_instantiated(self, alias, path, context):
+        L = logging.getLogger(__name__)
+        if alias in self.instdAliases:
+            self.instdAliases[alias].append( (path, context) )
+        else:
+            self.instdAliases[alias] = [(path, context)]
+        L.debug( 'Alias "%s" instantiated as entry %s'%(alias, path) )
 
 class Paths( collections.MutableMapping ):
     """
@@ -375,8 +603,6 @@ class Paths( collections.MutableMapping ):
         nm = m.group( 'nmTmpl' )
         if len(m.group('isFile')):
             # TODO: validate file description.
-            if value is None:
-                raise BadFileDescription( '%s at %s'%(templatedName, os.path.join(*path)) )
             fileRelTemplatePath = os.path.join(*(path+[nm]))
             L.debug( 'FS entry(-ies) "%s" will be considered as a file(s).'
                     , fileRelTemplatePath )
@@ -391,14 +617,9 @@ class Paths( collections.MutableMapping ):
             self._aliases[alias] = os.path.join(*path, nm)
         return nm, v
 
-    def __init__(self, initObject, pKey=DFT_PATH_KEY, contextHooks={}):
-        """
-        Templates may refer to volatile path-rendering context entities with
-        name given by `pKey'.
-        """
-        self._aliases = {}
+    def __init__(self, initObject, contextHooks={}):
+        self._aliases = bidict.bidict({})
         self._files = {}
-        self._pKey = pKey
         self._dStruct = self._treat_expression( initObject )
         self.contextHooks = contextHooks
 
@@ -409,7 +630,7 @@ class Paths( collections.MutableMapping ):
         raise NotImplementedError()  # TODO
 
     def __setitem__( self, pthTuple, value ):
-        L = logging.getLogger('lamia.filesystem')
+        L = logging.getLogger(__name__)
         path, v = None, None
         nmTemplate = None
         if type(pthTuple) is tuple:
@@ -497,15 +718,21 @@ class Paths( collections.MutableMapping ):
         assert(createdRef)
         for k, v in fs.items():
             createdRef.push(k)
+            templatePath = createdRef.current_path(full=False, asString=True)
+            fsEntryAlias = self._aliases.inv.get(templatePath, None)
             if type(v) is dict:
                 self._generate( v, pathCtx=pathCtx
                     , leafHandler=leafHandler, tContext=tContext
                     , createdRef=createdRef )
+                if fsEntryAlias:
+                    for p, tmpContext in render_path_templates(
+                                *createdRef.current_path(full=True),
+                                requireComplete=True, **pathCtx ):
+                        createdRef.assure_dir_exists( p, tmpContext, alias=fsEntryAlias )
             if not leafHandler:
                 continue
             # 'Templated' relative path subtree token. Used as key to identify
             # particular file entity.
-            templatePath = createdRef.current_path(full=False, asString=True)
             # Iterate over all possible instantiations of current path template
             for p, tmpContext in render_path_templates( *createdRef.current_path(full=True)
                                                        , requireComplete=True
@@ -521,53 +748,25 @@ class Paths( collections.MutableMapping ):
                     # If it is not a file, just ensure dir exists and that's
                     # it. Note, that if dir was existing before the execution,
                     # it won't be added to "created" index.
-                    createdRef.assure_dir_exists( p, tmpContext )
+                    createdRef.assure_dir_exists( p, tmpContext, alias=fsEntryAlias )
                     continue
-                dirPath, filename = os.path.split(p)
-                if dirPath not in createdRef.visited:
-                    createdRef.assure_dir_exists( dirPath, tmpContext )
-                    createdRef.visited.add(dirPath)
-                # Update the pathCtx with tmpContext here
-                if isinstance( pathCtx, lamia.core.configuration.Stack ):
-                    pathCtx.push( tmpContext
-                                , tag='recursive-path-subst' )
-                elif type( pathCtx ) is dict:
-                    pathCtx = copy.deepcopy( tmpContext )
-                else:
-                    raise TypeError( type(pathCtx) )
-                # Take care of the entites that are not presented in current
-                # context within the runtime stack (explicitly mark them as
-                # deleted) since path context shall contain ONLY the keys
-                # consumed within current path.
-                for pathKey in pathCtx.keys():
-                    if pathKey not in tmpContext.keys():
-                        del pathCtx[pathKey]
-                # Apply the appropriate handler to generate the leaf node.
-                try:
-                    L.debug( 'handling the "%s"', p )
-                    context = copy.deepcopy( tContext )
-                    if self._pKey in context.keys():
-                        L.warning( 'The "%s" is already in'
-                            ' template\'s context. Preserving it.'%self._pKey )
-                    else:
-                        context[self._pKey] = pathCtx
-                    if 'paths' in context.keys():
-                        L.warning( 'The "paths" is already in'
-                                ' template\'s context. Preserving it.' )
-                    else:
-                        context['paths'] = self
-                    # TODO: finer control over the file creation -- delegate it
-                    # to `createdRef'
-                    leafHandler( self._files[templatePath], path=p
-                               , context=context, contextHooks=self.contextHooks )
-                    createdRef.add_created_file(p, tmpContext)
-                except:
-                    L.error( 'During template-rendering handler invocation'
-                            ' for node: %s', p )
-                    raise
-                finally:
-                    if isinstance( pathCtx, lamia.core.configuration.Stack ):
-                        pathCtx.pop( tag='recursive-path-subst' )
+                fileDescription = self._files[templatePath]
+                if fileDescription is None:
+                    # No description provided for file entry -- it's a shortcut
+                    continue
+                with createdRef.handle_file( p, tContext, tmpContext
+                        , mode=fileDescription.get('mode', None)
+                        , alias=fsEntryAlias
+                        ) as (context, hf):
+                    try:
+                        leafHandler( fileDescription, hf
+                                   , path=p  # Path is used indirectly
+                                   , context=context
+                                   , contextHooks=self.contextHooks )
+                    except:
+                        L.error( 'During template-rendering handler invocation'
+                                ' for node: %s', p )
+                        raise
             createdRef.pop(k)
 
     def create_on( self, root
@@ -575,7 +774,8 @@ class Paths( collections.MutableMapping ):
                  , tContext={}
                  , leafHandler=None
                  , level=None
-                 , createdRef=None ):
+                 , createdRef=None
+                 , mode=PathsDeployment.Operation.GENERATE ):
         """
         Entry point for in-dir subtree creation.
             @root is a base dir where the subtree must start
@@ -587,17 +787,33 @@ class Paths( collections.MutableMapping ):
         a recursive process of template rendering.
         Returns `createdRef' (if provided, or new instance if not) -- an
         instance of `PathsDeployment' class.
+
+        Returns a dictionary of instantiated aliases.
         """
+        L = logging.getLogger(__name__)
         if createdRef is None:
-            createdRef = PathsDeployment( root )
-        self._generate( self if level is None else dpath.util.get(self, level)
-                , pathCtx=pathCtx
-                , tContext=tContext
-                , leafHandler=leafHandler
-                , createdRef=createdRef )
-        #tr = asciitree.LeftAligned()
-        #print(tr(createdRef._created))
-        return createdRef
+            createdRef = PathsDeployment( root, self, mode=mode )
+        try:
+            self._generate( self if level is None else dpath.util.get(self, level)
+                    , pathCtx=pathCtx
+                    , tContext=tContext
+                    , leafHandler=leafHandler
+                    , createdRef=createdRef )
+        except Exception as e:
+            nEntriesCreated = len(createdRef._created)
+            L.error('An error occured during rendering subtree in "%s":'%root)
+            L.exception(e)
+            L.error('%d entries were created prior to this error occured%s'%(
+                    nEntriesCreated, ':' if nEntriesCreated else '.' ))
+            for cep in createdRef._created.keys():
+                L.warning( '  %s'%cep )
+            if nEntriesCreated:
+                if lamia.confirm.ask_for_confirm( 'Confirm deletion'
+                        ' of %d newly-created or overwritten'
+                        ' entries?'%nEntriesCreated, default='y' ):
+                    createdRef.clean_created()
+            raise
+        return createdRef.instdAliases
 
 def auto_path( p
              , fStruct=None
@@ -660,13 +876,11 @@ class FSSubtreeContext(object):
     """
     With-statement context for file structure.
     """
-    def __init__( self, fsManifest, pathDefinitions={}
-                , onFailure=None, pKey=DFT_PATH_KEY, contextHooks={}):
+    def __init__( self, fsManifest, pathDefinitions={}, contextHooks={}):
         """
         Will construct file structure (if it is not yet being done).
         """
-        self._fstruct = Paths(fsManifest, pKey=pKey, contextHooks=contextHooks)
-        self._onFailure = onFailure
+        self._fstruct = Paths(fsManifest, contextHooks=contextHooks)
 
     def __enter__(self):
         """
@@ -676,10 +890,5 @@ class FSSubtreeContext(object):
 
     def __exit__(self, excType, excValue, traceBack):
         L = logging.getLogger(__name__)
-        if excType:
-            if self._onFailure:
-                self._onFailure( self._fstruct, excType, excValue, traceBack )
-            else:
-                L.error( 'onFailure-handler is not set for filesystem subtree'
-                        ' context manager.' )
+        pass  # TODO: what?
 

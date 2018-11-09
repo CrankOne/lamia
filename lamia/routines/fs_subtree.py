@@ -46,6 +46,12 @@ gCommonParameters = {
     'fstruct,f' : {
         'help' : "File structure template to render.",
     },
+    'force_overwrite' : {
+        'help' : "If given, cause the filesystem subtree deployment procedure"
+            " to overwrite existing filesystem entries silently (without a"
+            " prompt.",
+        'action' : 'store_true'
+    },
     'path_context' : {
         'help' : "Path context stack description. May be a file to be added"
             " in context stack, or alias: @fContext (for file template"
@@ -248,13 +254,11 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
             self._memFiles[label] = io.StringIO()
         return self._memFiles[label]
 
-    def subtree(self, fstruct, fstructConf='default', pKey='__p', contextHooks={}):
+    def subtree(self, fstruct, fstructConf='default', contextHooks={}):
         # { k : s.getvalue() for k, s in self._memFiles.items() }
         return lamia.core.filesystem.FSSubtreeContext(
                 parse_fstruct( fstruct, fstructConf
                              , pathVariables=self.pStk ),
-                onFailure=None,  #< TODO: on-failure confirm created subtree removal
-                pKey=pKey,
                 contextHooks=contextHooks)
 #                               *** *** ***
 class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
@@ -273,7 +277,8 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
              , fstructConf='default'
              , templatesDirs=[]
              , showDiff=False
-             , env=None ):
+             , env=None
+             , forceOverwrite=False ):
         """
         Single function performing rendering of the subtree. Arguments:
         @outputDir -- defines the base (target) directory where subtree has to
@@ -298,23 +303,30 @@ class DeploySubtreeTask( lamia.routines.render.RenderTemplateTask
         between of path template-rendering and generating the actual subtree.
         """
         if showDiff: raise NotImplementedError('Subtree diffs.')  # TODO
+        if forceOverwrite:
+            mode = lamia.core.filesystem.PathsDeployment.Operation.OVERWRITE
+        else:
+            mode = lamia.core.filesystem.PathsDeployment.Operation.GENERATE
         with self.env.subtree( fstruct, fstructConf=fstructConf) as fstruct:
             self.env.t.deploy_fs_struct( outputDir, fstruct, self.env.pStk
-                                  , templateContext=self.env.rStk )
+                                  , templateContext=self.env.rStk
+                                  , mode=mode )
 
     def _main( self, outputDir, fstruct
              , fstructConf='default'
              , contexts=[], definitions=[]
              , pathContexts=[], pathDefinitions=[]
              , templatesDirs=[]
-             , showDiff=False ):
+             , showDiff=False
+             , forceOverwrite=False ):
         self.env = DeploymentEnv(templatesDirs)
         self.taskCfg.apply( self.env.set_path_templating )
         self.taskCfg.apply( self.env.set_contexts )
         self.deploy_subtree( outputDir, fstruct
                            , fstructConf=fstructConf
                            , templatesDirs=templatesDirs
-                           , showDiff=showDiff )
+                           , showDiff=showDiff
+                           , forceOverwrite=forceOverwrite )
 #                               *** *** ***
 if "__main__" == __name__:
     lamia.logging.setup()

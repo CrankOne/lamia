@@ -31,13 +31,10 @@ import jinja2 as j2
 import jinja2.lexer, jinja2.ext
 import lamia.core.configuration as LC
 import lamia.core.filesystem as FS
-from enum import Enum
 
 # Template files regex (any file, except hidden ones and swap files produced
 # by some editors/IDEs).
 rxTemplateFilePat = re.compile(r'^(?P<dir>.+\/)?(?P<filename>[^.~#]\w*)(?:\.(?P<extension>\w+))?$')
-# Default access mode for files created.
-DFTFMOD = 0o664
 
 class BadAbsolutePath(ValueError):
     """
@@ -197,25 +194,21 @@ class Loader(j2.BaseLoader):
         # get the proper line numbering.
         return yObj['template'], pth, lambda: True
 
-class Operation(Enum):
-    GENERATE = 1
-    EXTRACT_DIFFS = 2
-
 class _RecursiveTemplatesHandler(object):
-    def __init__( self, renderers={}, mode=Operation.GENERATE ):
+    """
+    Common template-rendering handler.
+    The template handler instances routes the rendering of a template reference
+    to the particular renderer in __call__() method accepting the stream
+    instance.
+    """
+    def __init__( self, renderers={} ):
         self.renderers = renderers
-        self.mode = mode
 
-    def __call__( self, template, path=None, context={}, contextHooks={} ):
+    def __call__( self, template, destStream, path=None
+                , context={}, contextHooks={} ):
         L = logging.getLogger('lamia.templates')
-        L.debug( 'Rendering of %s.'%path )
         rTxt = None
         if type(template) is str:
-            if '@' == template:
-                # A special case for files paths that do not correspond to any
-                # file created by subtree-creating procedure, but rather being
-                # injected into subtree for further usage in user code.
-                return
             rTxt = self.renderers['default'](template, **context)
         elif type(template) is dict:
             ctxStk = LC.Stack(dict(context))
@@ -245,15 +238,7 @@ class _RecursiveTemplatesHandler(object):
             raise TypeError( 'Expected either a string identifying template'
                     ' or a dictionary with "class" field, not an instance of'
                     ' "%s".'%(type(template)) )
-        if Operation.GENERATE == self.mode:
-            with open(path, 'w') as f:
-                f.write(rTxt)
-            mode = template.get('mode', DFTFMOD) if type(template) is dict else DFTFMOD
-            os.chmod(path, mode)
-        else:
-            # TODO: at least EXTRACT_DIFFS may come in hand soon
-            raise NotImplementedError( "Operation %s of"
-                    " Lamia template engine."%self.mode )
+        destStream.write(rTxt)
 
 class PlainTextRenderer(object):
     """
@@ -271,11 +256,9 @@ class Templates(object):
     """
     def __init__( self, templatesDirs
                 , loaderInterpolators=None
-                , mode=Operation.GENERATE
                 , additionalFilters={}
                 , extensions=[] ):
         L = logging.getLogger(__name__)
-        self.mode = mode
         # Require target dir to be accessible and actually a dir (or a symlink
         # to dir)
         for d in templatesDirs:
@@ -323,7 +306,8 @@ class Templates(object):
     def deploy_fs_struct( self, root, fs, pathTemplateArgs
                         , renderers={}
                         , templateContext={}
-                        , level=None ):
+                        , level=None
+                        , mode=FS.PathsDeployment.Operation.GENERATE ):
         """
         Performs deployment of filesystem structure subtree according to fiven
         subtree description and template-rendering context.
@@ -333,6 +317,8 @@ class Templates(object):
         @renderers -- supplementary template renderers
         @templateContext -- a dict-like context object for template rendering
         (usually a lamia.core.configuration.Stack object).
+
+        Returns a dictionary of instantiated aliases.
         """
         L = logging.getLogger('lamia.templates')
         if not issubclass( type(fs), FS.Paths ):
@@ -345,11 +331,12 @@ class Templates(object):
             L.warning( 'Template renderer "default" will be overriden when'
                     ' deploying FS structure.' )
         renderers['default'] = self
-        fs.create_on( root
+        return fs.create_on( root
                 , pathCtx=pathTemplateArgs
-                , tContext=copy.deepcopy(templateContext)
+                , tContext=templateContext
                 , leafHandler=_RecursiveTemplatesHandler(renderers=renderers)
-                , level=level )
+                , level=level
+                , mode=mode )
 
 def render_string( strTmpl, _additionalFilters={}, _extensions=[], **kwargs ):
     """

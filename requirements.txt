@@ -2,4 +2,6 @@ pyyaml
 dpath
 jinja2
 inflection
+bidict
+asciitree
 htcondor
