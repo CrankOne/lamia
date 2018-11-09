@@ -180,15 +180,16 @@ def check_dir( path, mode=None ):
     Ensures that directory exists and, optionally, has proper access rights.
     If dir doesn't exist, it will be created either with 0o777, or with given
     mode permissions.
-    If mode is None, no mode check is performed.
+    TODO: If mode is None, no mode check is performed.
     """
     try:
         os.makedirs( path )
     except OSError as e:
         if e.errno == errno.EEXIST and os.path.isdir(path):
-            pass
+            return False
         else:
             raise
+    return True
 
 def get_path_meanings( path, basedir=None, recursive=False, rxStr=None ):
     """
@@ -280,25 +281,29 @@ class PathsDeployment(object):
     entities just being created in case of something goes wrong.
     """
     def __init__(self, root ):
+        assert(type(root) is str)
         # list of path (as strings) being visited
         self.visited = set()
         # filesystem subtree dict-like tree of entities being created
-        self.created = dict()
+        self._created = collections.OrderedDict()
         # current list of path tokens, stacked during recursive traversal
-        self.path = []
+        self._path = []
         # base directory for deployment (filesystem subtree prefix)
-        self.root = root
-        assert(type(self.root) in (str, tuple, list))
+        self.root = os.path.realpath( root )
 
     def push(self, dirName):
-        self.path.append( dirName )
+        self._path.append( dirName )
 
     def pop(self, expectedName=None):
         if expectedName is not None \
-        and expectedName != self.path[-1]:
-            raise AssertionError('Expected path token on top: "%s","
-                    " real is "%s".'%(expectedName, self.path[-1]) )
-        return self.pop()
+        and expectedName != self._path[-1]:
+            raise AssertionError('Expected path token on top: "%s",'
+                    ' real is "%s".'%(expectedName, self._path[-1]) )
+        return self._path.pop()
+
+    @property
+    def path(self):
+        return copy.copy(self._path)
 
     def current_path(self, full=False, asString=False):
         """
@@ -311,11 +316,38 @@ class PathsDeployment(object):
             elif type(self.root) in (tuple, list):
                 ret = list(self.root) + ret
         if asString:
-            ret = os.path.join(*ret)
-        return ret
+            return os.path.join(*ret)
+        else:
+            return tuple(ret)
 
-    #def add_visited( self, token ):
-    #    self.vivited.add( os.path. )
+    def normalized_relative_path( self, pt_ ):
+        """
+        Returns normalized relative path within root directory subtree.
+        """
+        if type(pt_) in (tuple, list):
+            pt = os.path.join(pt_)
+        elif type(pt_) is str:
+            pt = pt_
+        else:
+            raise TypeError('Expected str, tuple or list.'
+                    ' Got: %s'%type(pt_).__name__)
+        cmPrfx = os.path.commonprefix( [pt, self.root] )
+        if not cmPrfx:
+            relPath = absPath
+        elif cmPrfx == self.root:
+            relPath = os.path.relpath( pt, start=self.root )
+        else:
+            raise RuntimeError('Wrong common prefix: "{prefix}".'
+                    '"{locPt}" path is expected to be in a subtree'
+                    ' of "{root}".'.format( prefix=cmPrfx, locPt=pt, root=self.root ))
+        return relPath
+
+    def assure_dir_exists( self, dp, pathCtx ):
+        if check_dir( dp ):
+            dpath.util.new( self._created, dp, {} )  # TODO: pathCtx
+
+    def add_created_file(self, fp, pathCtx ):
+        dpath.util.new( self._created, self.normalized_relative_path(fp), {} )  # TODO: pathCtx
 
 class Paths( collections.MutableMapping ):
     """
@@ -471,29 +503,36 @@ class Paths( collections.MutableMapping ):
                     , createdRef=createdRef )
             if not leafHandler:
                 continue
-            for p, pathContext in render_path_templates( *createdRef.current_path(full=True)
+            # 'Templated' relative path subtree token. Used as key to identify
+            # particular file entity.
+            templatePath = createdRef.current_path(full=False, asString=True)
+            # Iterate over all possible instantiations of current path template
+            for p, tmpContext in render_path_templates( *createdRef.current_path(full=True)
                                                        , requireComplete=True
                                                        , **pathCtx ):
-                templatePath = createdRef.current_path(full=False, asString=True)
                 if p not in createdRef.visited:
                     createdRef.visited.add(p)
                 else:
                     L.debug( 'Omitting visited path %s.', p )
                     continue
+                # Poor-man way to determine, whether this path token
+                # corresponds to file. TODO: if dir, submit mode
                 if templatePath not in self._files.keys():
-                    check_dir( p )
+                    # If it is not a file, just ensure dir exists and that's
+                    # it. Note, that if dir was existing before the execution,
+                    # it won't be added to "created" index.
+                    createdRef.assure_dir_exists( p, tmpContext )
                     continue
                 dirPath, filename = os.path.split(p)
-                check_dir( dirPath )
                 if dirPath not in createdRef.visited:
-                    check_dir( dirPath )
+                    createdRef.assure_dir_exists( dirPath, tmpContext )
                     createdRef.visited.add(dirPath)
-                # Update the pathCtx with pathContext here
+                # Update the pathCtx with tmpContext here
                 if isinstance( pathCtx, lamia.core.configuration.Stack ):
-                    pathCtx.push( pathContext
+                    pathCtx.push( tmpContext
                                 , tag='recursive-path-subst' )
                 elif type( pathCtx ) is dict:
-                    pathCtx = copy.deepcopy( pathContext )
+                    pathCtx = copy.deepcopy( tmpContext )
                 else:
                     raise TypeError( type(pathCtx) )
                 # Take care of the entites that are not presented in current
@@ -501,7 +540,7 @@ class Paths( collections.MutableMapping ):
                 # deleted) since path context shall contain ONLY the keys
                 # consumed within current path.
                 for pathKey in pathCtx.keys():
-                    if pathKey not in pathContext.keys():
+                    if pathKey not in tmpContext.keys():
                         del pathCtx[pathKey]
                 # Apply the appropriate handler to generate the leaf node.
                 try:
@@ -517,10 +556,11 @@ class Paths( collections.MutableMapping ):
                                 ' template\'s context. Preserving it.' )
                     else:
                         context['paths'] = self
-                    leafHandler( self._files[templatePath]
-                               , path=createdRef.path
-                               , context=context
-                               , contextHooks=self.contextHooks )
+                    # TODO: finer control over the file creation -- delegate it
+                    # to `createdRef'
+                    leafHandler( self._files[templatePath], path=p
+                               , context=context, contextHooks=self.contextHooks )
+                    createdRef.add_created_file(p, tmpContext)
                 except:
                     L.error( 'During template-rendering handler invocation'
                             ' for node: %s', p )
@@ -545,6 +585,8 @@ class Paths( collections.MutableMapping ):
             @level might be used to deploy only certain branch (TODO: untested)
         Internally, delegates execution to private _generate() method starting
         a recursive process of template rendering.
+        Returns `createdRef' (if provided, or new instance if not) -- an
+        instance of `PathsDeployment' class.
         """
         if createdRef is None:
             createdRef = PathsDeployment( root )
@@ -553,6 +595,9 @@ class Paths( collections.MutableMapping ):
                 , tContext=tContext
                 , leafHandler=leafHandler
                 , createdRef=createdRef )
+        #tr = asciitree.LeftAligned()
+        #print(tr(createdRef._created))
+        return createdRef
 
 def auto_path( p
              , fStruct=None
