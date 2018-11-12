@@ -23,7 +23,12 @@
 The shell utilities to the HTCondor facility is the most elaborated way to
 interact with its interfaces (and actually an only full-fledged one).
 """
-import logging, re, os, copy, subprocess, itertools
+import logging, re, os, copy, subprocess, itertools, networkx, functools
+import sys  # XXX
+# uncomment this and few lines below for @native-graph-drawing
+#import pylab
+# uncomment this and few lines below for @graphviz-graph-drawing
+#from networkx.drawing.nx_agraph import graphviz_layout, to_agraph
 import lamia.backend.interface
 
 # HTCondor job ID syntax, ususally consisting of <clusterID>.<ProcessID>
@@ -53,6 +58,7 @@ def serialize_queue( qd, nProc ):
     Returns HTCondor's `queue ...' string and number of parallel processes
     per single homogeneous product.
     """
+    L = logging.getLogger(__name__)
     rxItem = re.compile(r'\$\((?P<name>Item\d+)\)')
     if qd is None:
         return "queue %d"%nProc, 1
@@ -64,8 +70,12 @@ def serialize_queue( qd, nProc ):
             imlk.append(m.groupdict()['name'])
         imlv.append( qd[k] )
     argsLines = []
-    for cmb in itertools.product(*imlv):
-        argsLines.append(' '.join(cmb))
+    try:
+        for cmb in itertools.product(*imlv):
+            argsLines.append(' '.join(cmb))
+    except:
+        L.error('..while computding product on %s'%str(imlv))
+        raise
     return "queue %d %s from (\n%s\n)"%( nProc
                                        , ','.join(imlk)
                                        , '\n'.join(argsLines) ), len(argsLines)
@@ -76,11 +86,16 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
     Ctr composes arguments for `condor_submit' shell invocation.
     """
     @staticmethod
-    def macros():
-        return { 'jIndex' : '$(Process)'
-               , 'jID' : '$(Cluster).$(Process)' }
+    def macros( submissionTag=None ):
+        r = { 'jIndex' : '$(Process)'
+            , 'jID' : '$(Cluster).$(Process)' }
+        if submissionTag:
+            r['subTag'] = submissionTag
+        else:
+            r['subTag'] = 'single'
+        return r
 
-    def _mk_subm_classAd( self, nProcs, cad ):
+    def _mk_subm_classAd( self, nProcs, cad, submissionTag=None ):
         L = logging.getLogger(__name__)
         # NOTE: the native `classad' module's instances seems to be pretty
         # useless due to their rudimentary serialization mechanism. Writing the
@@ -92,15 +107,24 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
         # Put the submission file nearby of exec, if it is not supplied by
         # back-end arguments
         if 'submissionFile' not in self.condorSubmitArgs:
-            submissionFilePath = os.path.join( dn, fexec + '.htcondor-sub')
+            postfix = '.htcondor.sub'
+            if submissionTag:
+                # use submission tag to produce different submission files
+                postfix = '.%s%s'%(submissionTag, postfix)
+            submissionFilePath = os.path.join( dn, fexec + postfix)
         else:
-            submissionFilePath = self.condorSubmitArgs.pop('submissionFile').format(**self.macros())
+            submissionFilePath = self.condorSubmitArgs.pop('submissionFile') \
+                    .format(**self.macros(submissionTag))
         # Put the user-log file nearby of exec, if it is not supplied by
         # back-end arguments
         if 'userLog' not in self.condorSubmitArgs:
-            cad["userLog"] = os.path.join( dn, fexec + '.htcondor-log')
+            postfix = '.htcondor-log'
+            if submissionTag:
+                postfix = '.%s%s'%(submissionTag, postfix)
+            cad["userLog"] = os.path.join( dn, fexec + postfix)
         else:
-            cad["userLog"] = self.condorSubmitArgs.pop('userLog').format(**self.macros())
+            cad["userLog"] = self.condorSubmitArgs.pop('userLog') \
+                    .format(**self.macros(submissionTag))
         self.userLog = cad['userLog']  # Save this value for further usage
         #
         if 'environment' in cad:
@@ -121,6 +145,15 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                         lamia.backend.interface.inject_placeholders(
                                 self.tCmd[1:], placeholderFormat="$(Item%d)" )
         # backendArguments['classAd']
+        if os.path.isfile(submissionFilePath):
+            # Warn user about re-writing the existing submission file. It is
+            # generally not a worrisome error since we kind of expect this to
+            # happen with re-generation of the same deployment, but have no
+            # means to control it using the standard subtree deployment
+            # procedure. In case of iterative tasks, however, this error may
+            # indicate an absent `submissionFile' parameter.
+            L.warning( 'HTCondor submission file "%s" exists'
+                    ' and will be re-written.'%submissionFilePath )
         with open(submissionFilePath, 'w') as f:
             for k, v in cad.items():
                 if 'queue' == k:
@@ -143,11 +176,15 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
             f.write(qs)
         return submissionFilePath
 
+    #def __hash__(self):
+    #    return id(self)
+
     def __init__( self, jobName, cfg
                 , cmd=None
                 , nProcs=1
                 , stdout=None, stderr=None
                 , timeout=300
+                , submissionTag=None
                 , backendArguments={}
                 , popenKwargs={} ):
         L = logging.getLogger(__name__)
@@ -167,8 +204,9 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 'output' : stdout.format(**self.macros()),
                 'error' : stderr.format(**self.macros())
             })
-        submissionFilePath = self._mk_subm_classAd( nProcs, baseAd )
-        self.cmd = [ cfg['execs.condorSubmit'], submissionFilePath
+        self.submissionFilePath = self._mk_subm_classAd( nProcs, baseAd,
+                submissionTag=submissionTag )
+        self.cmd = [ cfg['execs.condorSubmit'], self.submissionFilePath
                , '-terse'
                , '-batch-name', jobName
                ]
@@ -244,11 +282,37 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         """
         return HTCondorShellSubmission( jobName, self.cfg, **kwargs )
 
-    def dispatch_jobs(self, j):
-        assert( isinstance(j, HTCondorShellSubmission) )
-        if j.dependencies:
-            raise NotImplementedError("Dependencies is not yet supported.")  # TODO
-        return self._submit( j )
+    def dispatch_jobs(self, js):
+        if isinstance(js, HTCondorShellSubmission):
+            if not js.dependencies:
+                # Trivial case -- no dependencies => no additional operations
+                # needed, straigtforward submission.
+                return self._submit( js )
+            js = [js]
+        # Hereafter use networkx to build the DAG (which then will be rendered
+        # into HTCondor's DAGMan file).
+        def _dep_convolution(acc, b):
+            acc.update(b.depGraph)
+            return acc
+        G = functools.reduce( _dep_convolution, [networkx.DiGraph()] + list(js) )
+        #
+        f = sys.stdout
+        for j in G:
+            f.write( 'JOB {jobName} {submFile}\n'.format(
+                jobName=j.jobName, submFile=j.submissionFilePath ) )
+        for j in G:
+            if not list(G.successors(j)): continue
+            f.write( 'PARENT %s CHILD '%j.jobName )
+            f.write( ' '.join(dep.jobName for dep in G.successors(j)) )
+            f.write('\n')
+
+        # @native-graph-drawing
+        #networkx.draw(G, with_labels=True)
+        #pylab.savefig('/tmp/DAG.png')
+        # @graphviz-graph-drawing
+        #A = to_agraph(G)
+        #A.layout('dot')
+        #A.draw('/tmp/DAG-2.png')
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass

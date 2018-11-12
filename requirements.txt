@@ -5,3 +5,4 @@ inflection
 bidict
 asciitree
 htcondor
+networkx

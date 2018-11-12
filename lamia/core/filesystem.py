@@ -407,7 +407,7 @@ class PathsDeployment(object):
         if not kwargs: return aliases
         kw = next(iter(kwargs.keys()))
         v = kwargs.pop(kw)
-        als = filter( lambda e: kw in e[1] and v == e[1][kw], aliases )
+        als = list(filter( lambda e: kw in e[1] and v == e[1][kw], aliases ))
         return PathsDeployment.alias_for(als, **kwargs)
 
     @staticmethod
@@ -617,11 +617,12 @@ class Paths( collections.MutableMapping ):
             self._aliases[alias] = os.path.join(*path, nm)
         return nm, v
 
-    def __init__(self, initObject, contextHooks={}):
+    def __init__(self, initObject, contextHooks={}, conditions={}):
         self._aliases = bidict.bidict({})
         self._files = {}
         self._dStruct = self._treat_expression( initObject )
         self.contextHooks = contextHooks
+        self.conditions = conditions
 
     def __getitem__(self, key):
         return dpath.util.get( self._dStruct, key )
@@ -730,6 +731,7 @@ class Paths( collections.MutableMapping ):
                                 requireComplete=True, **pathCtx ):
                         createdRef.assure_dir_exists( p, tmpContext, alias=fsEntryAlias )
             if not leafHandler:
+                createdRef.pop(k)
                 continue
             # 'Templated' relative path subtree token. Used as key to identify
             # particular file entity.
@@ -737,6 +739,25 @@ class Paths( collections.MutableMapping ):
             for p, tmpContext in render_path_templates( *createdRef.current_path(full=True)
                                                        , requireComplete=True
                                                        , **pathCtx ):
+                fileDescription = self._files.get(templatePath, None)
+                if fileDescription and 'conditions' in fileDescription:
+                    # Some entries may have simple conditional switches that
+                    # are tested against current context.
+                    proceed = True
+                    for cond in fileDescription['conditions']:
+                        if cond.startswith('eval:'):
+                            try:
+                                proceed &= eval( cond[5:], copy.copy(tmpContext) )
+                            except:
+                                L.error('..while evaluating condition "{cond}"'
+                                        ' for file "{file_}"'.format(cond=cond,
+                                            file_=str(p) ) )
+                                raise
+                        else:
+                            raise NotImplementedError('Condition "%s" check'
+                                    ' (node "%s").'%(cond, str(p)))
+                    if not proceed:
+                        continue
                 if p not in createdRef.visited:
                     createdRef.visited.add(p)
                 else:
@@ -750,7 +771,6 @@ class Paths( collections.MutableMapping ):
                     # it won't be added to "created" index.
                     createdRef.assure_dir_exists( p, tmpContext, alias=fsEntryAlias )
                     continue
-                fileDescription = self._files[templatePath]
                 if fileDescription is None:
                     # No description provided for file entry -- it's a shortcut
                     continue
@@ -876,11 +896,13 @@ class FSSubtreeContext(object):
     """
     With-statement context for file structure.
     """
-    def __init__( self, fsManifest, pathDefinitions={}, contextHooks={}):
+    def __init__( self, fsManifest
+                , pathDefinitions={}, contextHooks={}, conditions={}):
         """
         Will construct file structure (if it is not yet being done).
         """
-        self._fstruct = Paths(fsManifest, contextHooks=contextHooks)
+        self._fstruct = Paths(fsManifest, contextHooks=contextHooks
+                , conditions=conditions)
 
     def __enter__(self):
         """
