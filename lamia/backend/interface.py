@@ -19,7 +19,7 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import abc, os, logging, sys, copy, argparse, re, enum, itertools
+import abc, os, logging, sys, copy, argparse, re, enum, itertools, networkx
 import lamia.core.configuration \
      , lamia.logging \
      , lamia.core.task
@@ -124,6 +124,15 @@ class Submission(abc.ABC):
         return self._deps
 
     @property
+    def depGraph(self):
+        G = networkx.DiGraph()
+        for n, dep in enumerate(self.dependencies):
+            assert( self is not dep )  # recursive dep!
+            G.add_edge(dep, self)
+            G.update(dep.depGraph)
+        return G
+
+    @property
     def nProcs(self):
         """
         Returns number of explicit processes. Does not count the implicit
@@ -170,9 +179,19 @@ class Submission(abc.ABC):
         if not self.stdin:
             raise ValueError( "Empty stdin input given for job submission." )
 
-    def add_dep( self, dep, props=None ):
-        assert( isinstance( dep, Submission ) )
-        self.deps.append( (dep, props) )
+    def add_dep( self, dep ):
+        if isinstance( dep, Submission ):
+            self._deps.append( dep )
+        elif type(dep) in (tuple, list, set):
+            for d in dep:
+                self.add_dep(d)
+        else:
+            raise TypeError( 'Either a Submission instance, or collection'
+                    ' (tuple, list or set) of instances is expected. Got'
+                    ' "%s"'%type(dep).__name__ )
+
+    def __str__(self):
+        return '%s:%x'%(self.jobName, id(self))
 
 
 class BatchBackend(abc.ABC):
@@ -206,12 +225,14 @@ class BatchBackend(abc.ABC):
     def queue(self, jobName, nProcs=1
                   , cmd=None
                   , stdout=None, stderr=None
+                  , submissionTag=None
                   , backendArguments={}
                   , popenKwargs={} ):
         """
         Shall compose and return the `Submission' subclass instance. Most
         frequently, just forwards arguments to the particular Submission
         subclass constructor.
+
         * The `cmd' must be either a list of shell command arguments to submit,
         or the entire command, or None/'-' indicating that input from stdin
         has to be retrieved.
@@ -231,6 +252,11 @@ class BatchBackend(abc.ABC):
         substitution. The list of common interpolation variables are:
             - {jIndex} -- `%I' for LSF, `$(Process)' for HTCondor
             - {jID} -- `%J' for LSF, `$(Cluster).$(Process)' for HTCondor
+            - {subTag} -- will be value of `submissionTag' or 'single' if
+            `submissionTag' is not set or set to None.
+        * `submissionTag' is useful in case of iterative procedures. Back-ends
+        use it by their own, to distingush between various submission replicas.
+
         Note, that for `nProcs' != 1 your submission must provide at least one
         of this macros within stderr/stdout.
         The job shall not be actually submitted in this method. The method
