@@ -23,11 +23,11 @@ import os, logging, logging.config, yaml
 
 gIsSetUp = False
 gColoredPrfxs = {
-        logging.CRITICAL : "\033[41;1;11m\u2592E\033[0m",
-        logging.ERROR    : "\033[31;1;11m\u2591e\033[0m",
-        logging.WARNING  : "\033[33;1;11m\u2591w\033[0m",
-        logging.INFO     : "\033[34;1;11m\u2591i\033[0m",
-        logging.DEBUG    : "\033[34;2;11m\u2591D\033[0m",
+        logging.CRITICAL : "\033[1;41;33m\u2592E\033[0m",
+        logging.ERROR    : "\033[2;41;32m\u2591e\033[0m",
+        logging.WARNING  : "\033[1;43;31m\u2591w\033[0m",
+        logging.INFO     : "\033[1;44;37m\u2591i\033[0m",
+        logging.DEBUG    : "\033[2;40;36m\u2591D\033[0m",
         logging.NOTSET   : "\033[31;2;11m\u2591?\033[0m"
     }
 

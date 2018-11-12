@@ -755,7 +755,7 @@ class Paths( collections.MutableMapping ):
                     # No description provided for file entry -- it's a shortcut
                     continue
                 with createdRef.handle_file( p, tContext, tmpContext
-                        , mode=fileDescription.get('mode', None)
+                        , mode=None if type(fileDescription) is str else fileDescription.get('mode', None)
                         , alias=fsEntryAlias
                         ) as (context, hf):
                     try:
