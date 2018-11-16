@@ -22,7 +22,7 @@
 Various auxilliary filesystem routines, coming in hand for lamia procedures.
 """
 import os, sys, errno, collections, re, dpath, yaml, itertools, logging, copy \
-     , glob, contextlib, argparse, io, bidict
+     , glob, contextlib, argparse, io, bidict, json
 import lamia.core.interpolation, lamia.core.configuration, lamia.confirm
 from enum import Enum
 from string import Formatter
@@ -376,7 +376,7 @@ class FileHandlerContextManager(object):
             or PathsDeployment.Operation.OVERWRITE == self.createdRef.mode :
                 if self.write_rendered():
                     self.createdRef.add_created_file(self._path, self.lCtxRef)
-                    L.info( ' .."{path}" of {size} bytes'.format(
+                    L.debug( ' .."{path}" of {size} bytes'.format(
                         path=self._path, size=cl) )
             elif PathsDeployment.Operation.EXTRACT_DIFFS:
                 self.show_file_diff()
@@ -747,11 +747,17 @@ class Paths( collections.MutableMapping ):
                     for cond in fileDescription['conditions']:
                         if cond.startswith('eval:'):
                             try:
-                                proceed &= eval( cond[5:], copy.copy(tmpContext) )
+                                condResult = eval( cond[5:], copy.copy(tmpContext) )
+                                if not condResult:
+                                    L.debug( 'Condition "{condTxt}" forbids file'
+                                        ' entry "{path}" (context: {ctxTxt})'
+                                        '.'.format( condTxt=cond[5:], path=p
+                                                  , ctxTxt=json.dumps(tmpContext) ) )
+                                proceed &= condResult
                             except:
                                 L.error('..while evaluating condition "{cond}"'
-                                        ' for file "{file_}"'.format(cond=cond,
-                                            file_=str(p) ) )
+                                        ' for file "{path}"'.format(cond=cond,
+                                            path=p, ctxTxt=json.dumps(tmpContext) ) )
                                 raise
                         else:
                             raise NotImplementedError('Condition "%s" check'
@@ -773,6 +779,8 @@ class Paths( collections.MutableMapping ):
                     continue
                 if fileDescription is None:
                     # No description provided for file entry -- it's a shortcut
+                    if fsEntryAlias:
+                        createdRef.alias_instantiated( fsEntryAlias, p, tmpContext )
                     continue
                 with createdRef.handle_file( p, tContext, tmpContext
                         , mode=None if type(fileDescription) is str else fileDescription.get('mode', None)

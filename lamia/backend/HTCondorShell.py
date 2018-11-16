@@ -23,7 +23,8 @@
 The shell utilities to the HTCondor facility is the most elaborated way to
 interact with its interfaces (and actually an only full-fledged one).
 """
-import logging, re, os, copy, subprocess, itertools, networkx, functools
+import logging, re, os, copy, subprocess, itertools, networkx, functools, io \
+     , hashlib, base64
 import sys  # XXX
 # uncomment this and few lines below for @native-graph-drawing
 #import pylab
@@ -282,7 +283,8 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         """
         return HTCondorShellSubmission( jobName, self.cfg, **kwargs )
 
-    def dispatch_jobs(self, js):
+    def dispatch_jobs(self, js, DAGFilePath=None):
+        L = logging.getLogger(__name__)
         if isinstance(js, HTCondorShellSubmission):
             if not js.dependencies:
                 # Trivial case -- no dependencies => no additional operations
@@ -296,16 +298,24 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             return acc
         G = functools.reduce( _dep_convolution, [networkx.DiGraph()] + list(js) )
         #
-        f = sys.stdout
+        dagf = io.StringIO()
         for j in G:
-            f.write( 'JOB {jobName} {submFile}\n'.format(
+            dagf.write( 'JOB {jobName} {submFile}\n'.format(
                 jobName=j.jobName, submFile=j.submissionFilePath ) )
         for j in G:
             if not list(G.successors(j)): continue
-            f.write( 'PARENT %s CHILD '%j.jobName )
-            f.write( ' '.join(dep.jobName for dep in G.successors(j)) )
-            f.write('\n')
-
+            dagf.write( 'PARENT %s CHILD '%j.jobName )
+            dagf.write( ' '.join(dep.jobName for dep in G.successors(j)) )
+            dagf.write('\n')
+        #
+        if not DAGFilePath:
+            if 'DAGFilesDir' not in self.cfg:
+                raise RuntimeError('No parameter for "DAGFilesDir" found in'
+                        ' HTCondorShell config, nor the "DAGFilePath" keyword'
+                        ' argument provided with dispatch_job() invocation.')
+            tok = base64.b64encode(hashlib.sha1(
+                dagf.getvalue().encode()).digest()).decode().strip('=')
+            DAGFilePath = os.path.join(self.cfg['DAGFilesDir'], tok + '.dag')
         # @native-graph-drawing
         #networkx.draw(G, with_labels=True)
         #pylab.savefig('/tmp/DAG.png')
@@ -313,6 +323,10 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         #A = to_agraph(G)
         #A.layout('dot')
         #A.draw('/tmp/DAG-2.png')
+        with open(DAGFilePath, 'w') as f:
+            f.write(dagf.getvalue())
+        # TODO: ...submit DAG file with:
+        # popen( self.cfg['execs']['submitDAG'], '-f', DAGFilePath )
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass
