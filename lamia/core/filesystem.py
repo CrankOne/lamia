@@ -87,6 +87,9 @@ def dict_product(**kwargs):
     scalars = {}
     sequences = {}
     callables = {}
+    # Iterate over keyword arguments to sort out the scalar values, sequences
+    # and callable objects (that may, in order, yield either a scalar or
+    # sequence).
     for k, v in kwargs.items():
         if _is_seq(v):
             sequences[k] = v
@@ -103,15 +106,23 @@ def dict_product(**kwargs):
             raise TypeError('%s: %s'%(k, type(v).__name__))
     keys = sequences.keys()
     vals = sequences.values()
+    # Obtain cartesian products of all the sequences, evolving them into scalar
+    # values. With each comination of scalar values derived from the product,
+    # compose the "plain" dictionary and use it with callables to yield the
+    # callables results.
     for instance in itertools.product(*vals):
+        assert(len(keys) == len(instance))  # cohesiveness of product and keys
         dct = dict(zip(keys, instance))
-        dct.update(scalars)
+        dct.update(scalars)  # update product result with scalars
         if not callables:
-            yield dct
+            yield dct  # No callables -> just yield the plain dict
         else:
+            # Fill the callable results
             callableAppendix = {}
             for ck, c in callables.items():
-                callableAppendix[k] = c(dct)
+                callableAppendix[ck] = c(dct)
+            # Update the plain dict with callable result and recursively
+            # compute product on them
             dct.update(callableAppendix)
             yield from dict_product(**dct)
 
@@ -142,6 +153,8 @@ def _rv_value(d, k, requireComplete=True):
     else:
         raise KeyError(k)
 
+# TODO: rename to 'render_path_template' (without 's') since the *args are
+# joined and current name is unprecise and misleading
 def render_path_templates(*args, requireComplete=True, **kwargs):
     """
     Renders the path according to given list of templated string and formatting
@@ -154,25 +167,36 @@ def render_path_templates(*args, requireComplete=True, **kwargs):
           ', '.join([ '"%s"'%s for s in args])
         , ', '.join([ '"%s"'%s for s in kwargs.keys()]) ))
     s = os.path.join(*args)
+    # `keys' is a list of tokens extracted from string
     keys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(s)]))
+    #for k in keys:
+    #    if _rv_value(kwargs, k, requireComplete=False) not in kwargs:
+    #        s = 'Insufficient path-rendering context. Key: "%s".'%k
+    #        if requireComplete:
+    #            raise KeyError(s)
+    #        else:
+    #            L.debug(s)
     try:
-        for skwargs in dict_product(**{
-                k : _rv_value(kwargs, k, requireComplete=requireComplete) \
-                        for k in keys }):
-            dfw = DictFormatWrapper( **dict(skwargs)
-                                   , requireComplete=requireComplete )
+        products = { k : _rv_value(kwargs, k, requireComplete=requireComplete) \
+                     for k in keys }
+        for cProd in dict_product(**products):
+            dfw = DictFormatWrapper( **dict(cProd), requireComplete=requireComplete )
             try:
                 np = s.format_map(dfw)
-                yield np, skwargs
+                yield np, cProd
             except:
-                L.error( 'During yielding product result on sub-keyword args:'
-                    ' {%s}, turned in formatting dict with keys {%s}.'%(
-                        ', '.join([ '"%s"'%skwa for skwa in skwargs ])
-                        , ', '.join(['"%s"'%k for k in dfw.keys()]) ) )
+                L.error( 'During substitution of product result'
+                    ' {subKWArgs}, turned in formatting dict with'
+                    ' keys {prKeys}.'.format(
+                        subKWArgs=', '.join(['"%s"'%skwa for skwa in cProd]),
+                        prKeys=', '.join(['"%s"'%k for k in dfw.keys()]) )
+                    )
                 raise
     except:
-        L.error( 'During yielding the path %s on set of keys: {%s}.'%(
-            s, ', '.join(['"%s"'%k for k in keys])) )
+        L.error( 'During yielding the path %s (extracted keys are {%s},'
+            ' submitted context keys: {%s}).'%( s
+                , ', '.join(['"%s"'%k for k in keys])
+                , ', '.join(['"%s"'%k for k in kwargs.keys()]) ) )
         raise
 
 def check_dir( path, mode=None ):
@@ -564,7 +588,7 @@ class PathsDeployment(object):
                     L.debug('File "%s" deleted.'%p)
             except Exception as e:
                 L.error('Was unable to delete entity "%s". Exception:'%p )
-                L.exception(e)
+                L.exception(e, exc_info=True)
                 # no re-raise, since we usually delete the fs within exception
                 # handler and raising another exception will broke the cleaning
                 # process
@@ -830,7 +854,7 @@ class Paths( collections.MutableMapping ):
         except Exception as e:
             nEntriesCreated = len(createdRef._created)
             L.error('An error occured during rendering subtree in "%s":'%root)
-            L.exception(e)
+            L.exception(e, exc_info=True)
             L.error('%d entries were created prior to this error occured%s'%(
                     nEntriesCreated, ':' if nEntriesCreated else '.' ))
             for cep in createdRef._created.keys():
