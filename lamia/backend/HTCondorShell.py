@@ -54,6 +54,20 @@ gDefaults = {
         }
     }
 
+# Example output of condor_submit_dag:
+#   -----------------------------------------------------------------------
+#   File for submitting this DAG to HTCondor           : alignment/P04phys2/exec/alignment.dag.condor.sub
+#   Log of DAGMan debugging messages                 : alignment/P04phys2/exec/alignment.dag.dagman.out
+#   Log of HTCondor library output                     : alignment/P04phys2/exec/alignment.dag.lib.out
+#   Log of HTCondor library error messages             : alignment/P04phys2/exec/alignment.dag.lib.err
+#   Log of the life of condor_dagman itself          : alignment/P04phys2/exec/alignment.dag.dagman.log
+#   
+#   Submitting job(s).
+#   1 job(s) submitted to cluster 951223.
+#   -----------------------------------------------------------------------
+rxHTCondorDAGOutParLine = re.compile( r'^(?P<description>.+)\s+:\s(?P<value>.+)$'
+                                    , re.MULTILINE)
+
 def serialize_queue( qd, nProc ):
     """
     Returns HTCondor's `queue ...' string and number of parallel processes
@@ -325,8 +339,26 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         #A.draw('/tmp/DAG-2.png')
         with open(DAGFilePath, 'w') as f:
             f.write(dagf.getvalue())
-        # TODO: ...submit DAG file with:
-        # popen( self.cfg['execs']['submitDAG'], '-f', DAGFilePath )
+        sCmd = [self.cfg['execs']['submitDAG'], '-force', DAGFilePath]
+        try:
+            submJob = subprocess.Popen( sCmd, stdout=subprocess.PIPE
+                                            , stderr=subprocess.PIPE )
+            out, err = submJob.communicate( timeout=self.cfg['timeouts.condorSubmit'] )
+            rc = submJob.returncode
+        except Exception as e:
+            raise lamia.backend.interface.SubmissionFailure( exception=e )
+        if 0 != rc or err:
+            L.error('`%s\' exited with code %d; stderr:\n%s'%(
+                sCmd.join(' '), rc, err ))
+        ret = { 'out' : [] }
+        for m in rxHTCondorDAGOutParLine.finditer( out ):
+            ret['out'].append( m.groupdict() )
+        ret.append( {'stderr' : err}, {'rc' : rc } )
+        for m in re.finditer( r'^(?P<nJobs>\d+) job\(s\) submitted to cluster (?P<clusterID>\d+)\.'
+                            , out, re.MULTILINE ):
+            assert( 'nJobs' not in ret.keys() )  # must be a single line in stdout
+            ret.update( m.groupdict() )
+        return ret
 
     def dump_logs_for(self, jID, popenKwargs={}):
         pass
