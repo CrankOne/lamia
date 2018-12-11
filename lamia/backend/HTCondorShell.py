@@ -347,15 +347,19 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             rc = submJob.returncode
         except Exception as e:
             raise lamia.backend.interface.SubmissionFailure( exception=e )
-        if 0 != rc or err:
-            L.error('`%s\' exited with code %d; stderr:\n%s'%(
-                sCmd.join(' '), rc, err ))
+        if 0 != rc:
+            L.error("`%s' exited with code %d; stderr:\n%s"%(
+                ' '.join(sCmd), rc, err.decode() ))
+        elif err:
+            L.warning("`%s' stderr message(s):\n%s"%(
+                ' '.join(sCmd), err.decode()))
         ret = { 'out' : [] }
-        for m in rxHTCondorDAGOutParLine.finditer( out ):
+        for m in rxHTCondorDAGOutParLine.finditer( out.decode() ):
             ret['out'].append( m.groupdict() )
-        ret.append( {'stderr' : err}, {'rc' : rc } )
+        ret['stderr'] = err.decode()
+        ret['rc'] = rc
         for m in re.finditer( r'^(?P<nJobs>\d+) job\(s\) submitted to cluster (?P<clusterID>\d+)\.'
-                            , out, re.MULTILINE ):
+                            , out.decode(), re.MULTILINE ):
             assert( 'nJobs' not in ret.keys() )  # must be a single line in stdout
             ret.update( m.groupdict() )
         return ret
