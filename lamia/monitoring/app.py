@@ -26,11 +26,16 @@ Code below constructs a primitive server.
 """
 import logging, json, schema
 import base64, bz2, pickle, networkx  # for dependency graph
-import lamia.monitoring.orm as models
 import lamia.monitoring.schemata as schemata
 import flask
+from flask_sqlalchemy import SQLAlchemy
 
 app = flask.Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/some.sqlite3'
+db = SQLAlchemy(app)
+
+import lamia.monitoring.orm as models
+db.create_all()
 
 @app.route('/')
 def root_view():
@@ -83,7 +88,7 @@ def proc_event():
         return flask.jsonify( resp )
     resp['valid'] = True
     # ----\ Schema /----
-    S = models.Session()
+    S = db.session
     # Look for task label
     if type( vd['from'] ) is str:
         task = S.query(models.BatchTask).filter_by(label=vd['from'] ).first()
@@ -129,7 +134,7 @@ def new_task():
     """
     resp = { 'created' : False, 'valid' : True }
     L = logging.getLogger(__name__)
-    S = models.Session()
+    S = db.session
     newTaskData = flask.request.get_json()
     try:
         vd = schemata.gTaskSchema.validate(newTaskData)
