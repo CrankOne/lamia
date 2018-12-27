@@ -1,5 +1,8 @@
+HOST=http://localhost:5000
+
+# Creates a testing task (depgraph is taken from one of the alignment tasks)
 curl --header 'Content-Type: application/json' \
-     --request PUT --data @- http://localhost:5000/api/new/task \
+     --request PUT --data @- $HOST/api/task/new \
      -w '%{http_code}\n' <<EOF
 {
     "label" : "testingTask",
@@ -18,19 +21,51 @@ curl --header 'Content-Type: application/json' \
 }
 EOF
 
+# Submits a "started" event for one of the arrays' job
 curl --header 'Content-Type: application/json' \
-  --request POST --data @- http://localhost:5000/api/proc/event \
+  --request POST --data @- $HOST/api/event \
   -w '%{http_code}\n' <<EOF
 {
     "from" : ["testingTask", "tstArray1", 12],
-    "type" : "beat",
+    "type" : "started",
+    "meta" : {
+        "host" : "$(hostname)",
+        "time" : "$(date +%s.%N)"
+    }
+}
+EOF
+
+# Submits a "progress" event for one of the arrays' job
+#curl --header 'Content-Type: application/json' \
+#  --request POST --data @- $HOST/api/event \
+#  -w '%{http_code}\n' <<EOF
+#{
+#    "from" : ["testingTask", "tstArray1", 12],
+#    "type" : "beat",
+#    "meta" : {
+#        "host" : "$(hostname)",
+#        "time" : "$(date +%s.%N)"
+#    },
+#    "payload" : {
+#        "completion" : 42
+#    }
+#}
+#EOF
+
+# Searches for the tasks of certain type
+curl --header 'Content-Type: application/json' \
+  --request POST --data @- $HOST/api/search \
+  -w '%{http_code}\n' <<EOF
+{
     "meta" : {
         "host" : "$(hostname)",
         "time" : "$(date +%s.%N)"
     },
-    "payload" : {
-        "completion" : 99
-    }
+    "subject" : "task",
+    "terms" : {
+        "name" : "testing"
+    },
+    "values" : [ "id" ]
 }
 EOF
 

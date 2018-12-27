@@ -47,7 +47,7 @@ class BatchTask(db.Model):
     arrays = db.relationship('ProcArray', back_populates='task')
     # List of individual jobs associated with the task, if any (not included
     # into arrays list)
-    jobs = db.relationship("RemoteProcess", back_populates='task')
+    jobs = db.relationship("StandaloneProcess", back_populates='task')
     # Task type tag, optional
     task_type = db.Column(db.String)
 
@@ -79,7 +79,7 @@ class ProcArray(db.Model):
     # Task to which this array is attached
     task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
     # Processes within the array
-    processes = db.relationship("RemoteProcess", back_populates='array')
+    processes = db.relationship("ArrayProcess", back_populates='array')
     # ...
 
 class RemoteProcess(db.Model):
@@ -98,18 +98,34 @@ class RemoteProcess(db.Model):
     rc = db.Column(db.Integer)
     # Events
     events = db.relationship('RemProcEvent', back_populates='process')
-    #
+    # Polymorphic id
+    type = db.Column(db.String(50))
+    __mapper_args__ = {
+        'polymorphic_identity': 'processes',
+        'polymorphic_on':type
+    }
+
+class ArrayProcess(RemoteProcess):
+    __tablename__ = 'array_jobs'
     array = db.relationship('ProcArray', back_populates='processes')
     # If process within an array: parent array's id, if any
     array_id = db.Column(db.Integer, db.ForeignKey('arrays.id'))
     # If process within an array: job index (number in array)
     job_num = db.Column(db.Integer)
-    #
+    __mapper_args__ = {
+        'polymorphic_identity':'array_jobs',
+    }
+
+class StandaloneProcess(RemoteProcess):
+    __tablename__ = 'standalone_jobs'
     task = db.relationship('BatchTask', back_populates='jobs')
     # If process not within an array: owning task ID
     task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
     # If process not within an array: process name
     name = db.Column(db.String)
+    __mapper_args__ = {
+        'polymorphic_identity':'standalone_jobs',
+    }
 
 class RemProcEvent(db.Model):
     """
@@ -120,18 +136,40 @@ class RemProcEvent(db.Model):
         - Beat: process notifies us that it is still running
         - Terminated: process done its job (successfully or not)
     Events may bear some arbitrary payload for custom usage.
+    The submitted/started event carries only the timestamp.
     """
     __tablename__ = 'events'
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     ev_type = db.Column(db.Enum(lamia.monitoring.schemata.RemProcEventType))
-    payload = Column(String)
+    payload = db.Column(db.String)
     #
     process = db.relationship('RemoteProcess', back_populates='events')
     proc_id = db.Column(db.Integer, db.ForeignKey('processes.id'))
-    # ...
+    type = db.Column(db.String(50))
+    __mapper_args__ = {
+        'polymorphic_identity': 'events',
+        'polymorphic_on':type
+    }
 
-#
+class RemProcBeatProgress(RemProcEvent):
+    """
+    Beating events are frequently sent by client jobs to indicate the
+    current progress. Here we define such a type for easier querying of this
+    information.
+    """
+    __tablename__ = 'progress_beats'
+    # Current progress
+    progress_current = db.Column(db.Integer)
+    # Upper limit of the entries (may be not defined)
+    progress_uplimit = db.Column(db.Integer)
+    __mapper_args__ = { 'polymorphic_identity':'progress_beats' }
 
-#Base.metadata.create_all(engine)
+class RemProcTerminated(RemProcEvent):
+    """
+    Termination messages usually carry
+    """
+    __tablename__ = 'termination_events'
+    completion = db.Column(db.Integer)
+    __mapper_args__ = { 'polymorphic_identity':'termination_events' }
 

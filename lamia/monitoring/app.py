@@ -40,7 +40,7 @@ db.create_all()
 def root_view():
     return 'Here be dragons.'
 
-@app.route( '/api/event/proc'
+@app.route( '/api/event'
           , methods=['POST'])
 def proc_event():
     """
@@ -109,10 +109,10 @@ def proc_event():
             return flask.jsonify( resp ), 404
         resp['arrayID'] = arr.id
         # Find process entry within the array (create, if it doesn't exist)
-        p = S.query(models.RemoteProcess).filter_by( array_id=arr.id
+        p = S.query(models.ArrayProcess).filter_by( array_id=arr.id
                                                    , job_num=vd['from'][2] ).first()
         if not p:
-            p = models.RemoteProcess( job_num=vd['from'][2] )
+            p = models.ArrayProcess( job_num=vd['from'][2] )
             S.add(p)
             resp['processCreated'] = True
             arr.processes.append(p)
@@ -120,9 +120,18 @@ def proc_event():
             resp['processCreated'] = False
     else:
         # Standalone process within the task
-        p = S.query(models.RemoteProcess).filter_by( task_id=task.id
-                                                   , name=vd['from'] ).first()
+        p = S.query(models.StandaloneProcess).filter_by( task_id=task.id
+                                                       , name=vd['from'] ).first()
+        if not p:
+            p = models.StandaloneProcess(name=vd['from'])
+            task.jobs.append(p)
+            S.add(p)
+            resp['processCreated'] = True
+            arr.processes.append(p)
+        else:
+            resp['processCreated'] = False
     # Create new event, associate with task and commit to DB
+    # TODO: for progress/termination types, use special classes
     eve = models.RemProcEvent( timestamp=vd['meta']['time']
                              , ev_type=vd['type'] )
     p.events.append(eve)
@@ -183,7 +192,7 @@ def new_task():
         t.arrays = arrs
         S.add_all(arrs)
     if 'jobs' in vd:
-        t.jobs = [ models.RemoteProcess(name=j, submitted=vd['meta']['time']) for j in vd['jobs'] ]
+        t.jobs = [ models.StandaloneProcess(name=j, submitted=vd['meta']['time']) for j in vd['jobs'] ]
         S.add_all(t.jobs)
     S.add(t)
     S.commit()
@@ -192,6 +201,7 @@ def new_task():
     return flask.jsonify( resp ), 201  # created
 
 @app.route( '/api/search'
-          , methods=['POST']):
+          , methods=['POST'])
+def search():
     pass
 
