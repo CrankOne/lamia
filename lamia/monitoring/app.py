@@ -25,7 +25,6 @@ RESTful API. This module declares object relational model for running tasks.
 Code below constructs a primitive server.
 """
 import logging, json, schema
-import base64, bz2, pickle, networkx  # for dependency graph
 import lamia.monitoring.schemata as schemata
 import flask
 from flask_sqlalchemy import SQLAlchemy
@@ -41,7 +40,7 @@ db.create_all()
 def root_view():
     return 'Here be dragons.'
 
-@app.route( '/api/proc/event'
+@app.route( '/api/event/proc'
           , methods=['POST'])
 def proc_event():
     """
@@ -113,14 +112,28 @@ def proc_event():
         p = S.query(models.RemoteProcess).filter_by( array_id=arr.id
                                                    , job_num=vd['from'][2] ).first()
         if not p:
-            pass  # TODO: create one
+            p = models.RemoteProcess( job_num=vd['from'][2] )
+            S.add(p)
+            resp['processCreated'] = True
+            arr.processes.append(p)
+        else:
+            resp['processCreated'] = False
     else:
-        # Standalone process within task
-        pass  # TODO
-    # ...
+        # Standalone process within the task
+        p = S.query(models.RemoteProcess).filter_by( task_id=task.id
+                                                   , name=vd['from'] ).first()
+    # Create new event, associate with task and commit to DB
+    eve = models.RemProcEvent( timestamp=vd['meta']['time']
+                             , ev_type=vd['type'] )
+    p.events.append(eve)
+    S.add(p)
+    S.commit()
+    resp['considered'] = True
+    resp['eventID'] = eve.id
+    #L.debug('Considered event of type ... from host ...')
     return flask.jsonify( resp )
 
-@app.route( '/api/new/task'
+@app.route( '/api/task/new'
           , methods=['PUT'])
 def new_task():
     """
@@ -148,36 +161,37 @@ def new_task():
         resp['taskID'] = t.id
         return flask.jsonify( resp ), 409  # conflict
         # see: https://stackoverflow.com/questions/3825990/http-response-code-for-post-when-resource-already-exists
-    if 'depGraph' in vd:
-        # get the dependency graph (decode, decompress, unpickle)
-        G = pickle.loads(bz2.decompress(base64.b64decode(vd['depGraph'])))
-        resp['graphDecoded'] = True
-        # TODO: rip off the information about tasks from the graph
     # Create task
     t = models.BatchTask( label=vd['label']
-                        , submitted=vd['submitted'] )
+                        , submitted=vd['meta']['time']
+                        , dep_graph=vd.get('depGraph', None)
+                        , task_type=vd.get('typeLabel', None) )
     if 'arrays' in vd:
         # fill task with arays
         arrs = []
         for arrNm, arrDscr in vd['arrays'].items():
             if type(arrDscr) is int:
-                arrs.append( models.ProcArray( submitted=vd['submitted']
+                arrs.append( models.ProcArray( submitted=vd['meta']['time']
                                              , name=arrNm
                                              , nJobs=arrDscr ) )
             else:
                 # TODO: check that fTolerance < nJobs
-                arrs.append( models.ProcArray( submitted=vd['submitted']
+                arrs.append( models.ProcArray( submitted=vd['meta']['time']
                                              , name=arrNm
                                              , fTolerance=arrDscr[0]
                                              , nJobs=arrDscr[1] ) )
         t.arrays = arrs
         S.add_all(arrs)
     if 'jobs' in vd:
-        t.jobs = [ models.RemoteProcess(name=j, submitted=vd['submitted']) for j in vd['jobs'] ]
+        t.jobs = [ models.RemoteProcess(name=j, submitted=vd['meta']['time']) for j in vd['jobs'] ]
         S.add_all(t.jobs)
     S.add(t)
     S.commit()
     resp['created'] = True
     resp['taskID'] = t.id
     return flask.jsonify( resp ), 201  # created
+
+@app.route( '/api/search'
+          , methods=['POST']):
+    pass
 

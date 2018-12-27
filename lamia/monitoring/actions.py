@@ -31,4 +31,8 @@ class Action(object):
         pass
 
 
+def new_task(  ):
+    """
+    Creates new task object
+    """
 
