@@ -18,21 +18,34 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 """
-Actions represents a controller part in MVC logic of this restful API. They do
-modify the model.
+Generic views defines the basic RESTful API.
+
+No HATEOAS currently implemented.
 """
 
-class Action(object):
-    def __init__(self, schema):
-        pass
+from lamia.monitoring.views import json_input
 
-    def __call__(self, data):
-        pass
+import lamia.monitoring.schemata
+
+#   create task
+#   event
+#   look-up for any object available
+#   query for set of objects
+
+#basicAPI = flask.Blueprint( 'basic-api', __name__ )
 
 
-def new_task(  ):
-    """
-    Creates new task object
-    """
+#@basicAPI.route('/events', methods=['POST'])
+#@json_input(lamia.monitoring.schemata.gEventSchema)
+
+
+#@basicAPI.route( '/task/new', methods=['PUT'])
+#@json_input(lamia.monitoring.schemata.gTaskSchema)
+#def new_task( vd ):
+#
+#@basicAPI.route( '/search', methods=['POST'])
+#def search():
+#    pass
 

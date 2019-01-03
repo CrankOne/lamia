@@ -25,10 +25,11 @@ RESTful API. This module declares object relational model for running tasks.
 Three classes below defines the general ORM: Task, Array and Process.
 """
 
-import datetime, enum, itertools
+import datetime, enum, itertools, json
 import lamia.monitoring.schemata
 import base64, bz2, pickle  # for dependency graph
 from lamia.monitoring.app import db
+from sqlalchemy.ext.declarative import DeclarativeMeta
 
 class BatchTask(db.Model):
     """
@@ -57,6 +58,16 @@ class BatchTask(db.Model):
         """
         pickle.loads(bz2.decompress(base64.b64decode(self.dep_graph))) if self.dep_graph else None
 
+    def as_dict(self):
+        return {
+                'label' : self.label,
+                'submitted' : '{}'.format(self.submitted.timestamp()),
+                'depGraph' : self.dep_graph,
+                'arrays' : [a.name for a in self.arrays],
+                'jobs' : [j.name for j in self.jobs],
+                'taskType' : self.task_type
+            }
+
 class ProcArray(db.Model):
     """
     Multiple processes may be unified within one processes array. The
@@ -80,7 +91,15 @@ class ProcArray(db.Model):
     task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
     # Processes within the array
     processes = db.relationship("ArrayProcess", back_populates='array')
-    # ...
+
+    def as_dict(self):
+        return {
+                'submitted' : '{}'.format(self.submitted.timestamp()),
+                'nJobs' : self.nJobs,
+                'name' : self.name,
+                'tolerance' : self.fTolerance,
+                'taskLabel' : self.task.label
+            }
 
 class RemoteProcess(db.Model):
     """
@@ -105,6 +124,14 @@ class RemoteProcess(db.Model):
         'polymorphic_on':type
     }
 
+    def as_dict(self):
+        return {
+                'submitted' : '{}'.format(self.submitted.timestamp()),
+                'rc' : self.rc,
+                'nEvents' : len(self.events),
+                # ... other by descendants
+            }
+
 class ArrayProcess(RemoteProcess):
     __tablename__ = 'array_jobs'
     array = db.relationship('ProcArray', back_populates='processes')
@@ -116,6 +143,12 @@ class ArrayProcess(RemoteProcess):
         'polymorphic_identity':'array_jobs',
     }
 
+    def as_dict(self):
+        return super().as_dict().update({
+                'array' : self.array.name,
+                'nJob' : self.job_num
+            })
+
 class StandaloneProcess(RemoteProcess):
     __tablename__ = 'standalone_jobs'
     task = db.relationship('BatchTask', back_populates='jobs')
@@ -126,6 +159,12 @@ class StandaloneProcess(RemoteProcess):
     __mapper_args__ = {
         'polymorphic_identity':'standalone_jobs',
     }
+
+    def as_dict(self):
+        return super().as_dict().update({
+                'task' : self.task.label,
+                'name' : self.name
+            })
 
 class RemProcEvent(db.Model):
     """
@@ -152,6 +191,15 @@ class RemProcEvent(db.Model):
         'polymorphic_on':type
     }
 
+    def as_dict(self):
+        return {
+                'timestamp' : '{}'.format(self.timestamp.timestamp()),
+                'type' : self.ev_type,  # str?
+                'payload' : self.payload,
+                'process' : None,  # TODO
+                # ... other by descendants
+            }
+
 class RemProcBeatProgress(RemProcEvent):
     """
     Beating events are frequently sent by client jobs to indicate the
@@ -165,6 +213,11 @@ class RemProcBeatProgress(RemProcEvent):
     progress_uplimit = db.Column(db.Integer)
     __mapper_args__ = { 'polymorphic_identity':'progress_beats' }
 
+    def as_dict(self):
+        return super().as_dict().update({
+                'progress' : (self.progress_current, self.progress_uplimit)
+            })
+
 class RemProcTerminated(RemProcEvent):
     """
     Termination messages usually carry
@@ -172,4 +225,9 @@ class RemProcTerminated(RemProcEvent):
     __tablename__ = 'termination_events'
     completion = db.Column(db.Integer)
     __mapper_args__ = { 'polymorphic_identity':'termination_events' }
+
+    def as_dict(self):
+        return super().as_dict().update({
+                'resultCode' : self.completion
+            })
 

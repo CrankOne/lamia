@@ -1,12 +1,13 @@
 HOST=http://localhost:5000
 
+#
 # Creates a testing task (depgraph is taken from one of the alignment tasks)
 curl --header 'Content-Type: application/json' \
-     --request PUT --data @- $HOST/api/task/new \
+     --request POST --data @- $HOST/api/tasks \
      -w '%{http_code}\n' <<EOF
 {
     "label" : "testingTask",
-    "meta" : {
+    "!meta" : {
         "host" : "$(hostname)",
         "time" : "$(date +%s.%N)"
     },
@@ -21,51 +22,82 @@ curl --header 'Content-Type: application/json' \
 }
 EOF
 
+#
 # Submits a "started" event for one of the arrays' job
 curl --header 'Content-Type: application/json' \
-  --request POST --data @- $HOST/api/event \
+  --request POST --data @- $HOST/api/events \
   -w '%{http_code}\n' <<EOF
 {
     "from" : ["testingTask", "tstArray1", 12],
     "type" : "started",
-    "meta" : {
+    "!meta" : {
         "host" : "$(hostname)",
         "time" : "$(date +%s.%N)"
     }
 }
 EOF
 
-# Submits a "progress" event for one of the arrays' job
+#
+# Retrieves event content
 #curl --header 'Content-Type: application/json' \
-#  --request POST --data @- $HOST/api/event \
+#  --request GET $HOST/api/events/12 \
+#  -w '%{http_code}\n'
+
+#
+# Retrieves task information
+curl --header 'Content-Type: application/json' \
+  --request GET $HOST/api/tasks/testingTask \
+  -w '%{http_code}\n'
+
+#
+# Submits a "progress" event for one of the arrays' job
+curl --header 'Content-Type: application/json' \
+  --request POST --data @- $HOST/api/events \
+  -w '%{http_code}\n' <<EOF
+{
+    "from" : ["testingTask", "tstArray1", 12],
+    "type" : "beat",
+    "!meta" : {
+        "host" : "$(hostname)",
+        "time" : "$(date +%s.%N)"
+    },
+    "payload" : {
+        "completion" : 72
+    }
+}
+EOF
+
+# Submits a "progress" event for one of the arrays' job
+curl --header 'Content-Type: application/json' \
+  --request POST --data @- $HOST/api/events \
+  -w '%{http_code}\n' <<EOF
+{
+    "from" : ["testingTask", "tstArray1", 12],
+    "type" : "beat",
+    "!meta" : {
+        "host" : "$(hostname)",
+        "time" : "$(date +%s.%N)"
+    },
+    "payload" : {
+        "completion" : 63
+    }
+}
+EOF
+
+# Searches for the tasks of certain type
+#curl --header 'Content-Type: application/json' \
+#  --request POST --data @- $HOST/api/search \
 #  -w '%{http_code}\n' <<EOF
 #{
-#    "from" : ["testingTask", "tstArray1", 12],
-#    "type" : "beat",
 #    "meta" : {
 #        "host" : "$(hostname)",
 #        "time" : "$(date +%s.%N)"
 #    },
-#    "payload" : {
-#        "completion" : 42
-#    }
+#    "subject" : "task",
+#    "terms" : {
+#        "name" : "testing"
+#    },
+#    "values" : [ "id" ]
 #}
 #EOF
-
-# Searches for the tasks of certain type
-curl --header 'Content-Type: application/json' \
-  --request POST --data @- $HOST/api/search \
-  -w '%{http_code}\n' <<EOF
-{
-    "meta" : {
-        "host" : "$(hostname)",
-        "time" : "$(date +%s.%N)"
-    },
-    "subject" : "task",
-    "terms" : {
-        "name" : "testing"
-    },
-    "values" : [ "id" ]
-}
-EOF
 

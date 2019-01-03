@@ -60,19 +60,23 @@ gMetaSignature = schema.Schema({
     })
 
 # Schema of incoming `event' message.
-gEventSchema = schema.Schema({
-        'meta' : gMetaSignature,
+eventSchema = {
+    'POST' : schema.Schema({
+        '!meta' : gMetaSignature,
         'from' : schema.Or( schema.And(str, len)
                           , [str, str, schema.Use(int)] ),
         'type' : schema.And( str
                            , lambda s : s.lower() in set(v[0] for v in _EV_TYPES.values())
                            , schema.Use( event_type_from_str ) ),
         schema.Optional('payload') : lambda o: type(o) is dict  # arbitrary dict
-    })
+    }),
+    # ...
+}
 
 # Schema of incoming `new task' message.
-gTaskSchema = schema.Schema({
-        'meta' : gMetaSignature,
+taskSchema = {
+    'POST' : schema.Schema({
+        '!meta' : gMetaSignature,
         'label' : str,
         'typeLabel' : str,
         'config' : lambda o: type(o) is dict,  # arbitrary dict
@@ -80,11 +84,13 @@ gTaskSchema = schema.Schema({
         schema.Optional('jobs') : [ str ],
         schema.Optional('arrays') : { str : schema.Or( schema.And(int, lambda n: n > 1)
                                                      , [ schema.And(int, lambda n: n > 1), schema.And(int, lambda n: n > 1) ] ) }
-    })
+    }),
+    # ...
+}
 
 # Schemata of incoming search/lookup requests
 gSearchSchema = schema.Schema({
-        'meta' : gMetaSignature,
+        '!meta' : gMetaSignature,
         'subject' : schema.And(str, lambda s: s in {'task', 'event', 'array', 'job'}),
         'terms' : { str, str },
         'values' : [ str ],
