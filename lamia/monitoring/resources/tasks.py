@@ -20,7 +20,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
-Generic views defines the basic RESTful API
+View defining tasks as a resource.
 
 No HATEOAS currently implemented.
 """
@@ -35,7 +35,7 @@ import lamia.monitoring.schemata as schemata
 class Tasks(flask_restful.Resource):
     method_decorators = [validate_input(schemata.taskSchema)]
     def post(self, vd):
-        resp = { 'created' : False, 'valid' : True }
+        resp = { 'created' : False }
         L = logging.getLogger(__name__)
         S = lamia.monitoring.app.db.session
         ct = vd['!meta']['time']

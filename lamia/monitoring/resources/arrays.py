@@ -20,18 +20,10 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
-Here the search queries as a first-class objects must be implemented.
+View defining jobs as a resource.
 
-Due to the technical difficulties of expressing query requests in JSON format,
-we postpone this implementation.
-
-One may find a simple resource declaring some reentrant frequent querying
-prototypes for immediate practical usage.
+No HATEOAS currently implemented.
 """
-
-from lamia.monitoring.views import json_input
-
-import lamia.monitoring.schemata
 
 import flask_restful
 import lamia.monitoring.orm as models
@@ -40,32 +32,29 @@ import lamia.monitoring.app
 from lamia.monitoring.resources import validate_input
 import lamia.monitoring.schemata as schemata
 
-def query_active_tasks():
-    """
-    Retrieves the tasks currently being active. A task considered active if
-    at least one of its processes (jobs or array element) is active (i.e. have
-    no termination event).
-    """
-    pass
+class Arrays(flask_restful.Resource):
 
-def query_active_processes():
-    """
-    A process considered active if it does not have a termination event.
-    """
-    L = logging.getLogger(__name__)
-    S = lamia.monitoring.app.db.session
-    pcs = S.query( models.RemoteProcess, models.RemProcEvent ) \
-            .filter( models.RemoteProcess.id == models.RemProcEvent.proc_id ) \
-            .filter( models.RemProcEvent.type != 'termination_events' ).all()
-    return pcs
+    method_decorators = [validate_input(schemata.arraySchema)]
 
-class Search(flask_restful.Resource):
-    method_decorators = [validate_input(schemata.searchSchema)]
+    def post(self, vd, taskLabel, arrayName=None):
+        if not arrayName:
+            raise ValueError('No "arrayName" provided.')
+        L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
+        cTime, cHost = vd['!meta']['time'], vd['!meta']['host']
+        # We require task label to be unique, so look up for existing one first:
+        t = S.query(models.BatchTask).filter_by( label=taskLabel ).one()
+        a = models.ProcArray( submitted=cTime, host=cHost
+                            , nJobs=vd['nJobs']
+                            , name=arrayName
+                            , fTolerance=vd['tolerance'] )
+        t.arrays.append(a)
+        S.add(a)
+        S.commit()
+        L.info( "{host}:{time} :: Created array, id={id_}".format(
+                host=cHost, time=unicode(cTime), id_=a.id ) )
+        return {'created' : True}, 201
 
-    # TODO: shall create and cache query object
-    #def post(self, vd):
+    #def get(self, taskLabel, name=None):
     #    pass
 
-    def get(self, queryID=None):
-        pass
 

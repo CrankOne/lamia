@@ -83,9 +83,7 @@ class Events(flask_restful.Resource):
             else:
                 resp['processCreated'] = False
         # Create new event, associate with task and commit to DB
-        # TODO: for progress/termination types, use special classes
-        eve = models.RemProcEvent( timestamp=vd['!meta']['time']
-                                 , ev_type=vd['type'] )
+        eve = models.new_remote_proc_event(vd)
         p.events.append(eve)
         S.add(p)
         S.commit()

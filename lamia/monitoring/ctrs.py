@@ -20,52 +20,29 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
-Here the search queries as a first-class objects must be implemented.
+Set of constructors that creates new entities on database.
 
-Due to the technical difficulties of expressing query requests in JSON format,
-we postpone this implementation.
-
-One may find a simple resource declaring some reentrant frequent querying
-prototypes for immediate practical usage.
+The need of dedicated module for this ctrs originates from their sophisticated
+relations.
 """
-
-from lamia.monitoring.views import json_input
-
-import lamia.monitoring.schemata
 
 import flask_restful
 import lamia.monitoring.orm as models
+from lamia.monitoring.resources import validate_input
 import flask, logging, json, schema
 import lamia.monitoring.app
-from lamia.monitoring.resources import validate_input
 import lamia.monitoring.schemata as schemata
 
-def query_active_tasks():
-    """
-    Retrieves the tasks currently being active. A task considered active if
-    at least one of its processes (jobs or array element) is active (i.e. have
-    no termination event).
-    """
-    pass
-
-def query_active_processes():
-    """
-    A process considered active if it does not have a termination event.
-    """
-    L = logging.getLogger(__name__)
-    S = lamia.monitoring.app.db.session
-    pcs = S.query( models.RemoteProcess, models.RemProcEvent ) \
-            .filter( models.RemoteProcess.id == models.RemProcEvent.proc_id ) \
-            .filter( models.RemProcEvent.type != 'termination_events' ).all()
-    return pcs
-
-class Search(flask_restful.Resource):
-    method_decorators = [validate_input(schemata.searchSchema)]
-
-    # TODO: shall create and cache query object
-    #def post(self, vd):
-    #    pass
-
-    def get(self, queryID=None):
-        pass
+def new_remote_proc_event( vd ):
+    if 'terminated' == vd['type']:
+        return models.RemProcTerminated( timestamp=vd['!meta']['time']
+                                       , ev_type=vd['type']
+                                       , completion=vd.get('exitCode', None) )
+    elif 'beat' == vd['type']:
+        return models.RemProcBeatProgress( timestamp=vd['!meta']['time']
+                                         , ev_type=vd['type']
+                                         , completion=vd.get('exitCode', None) )
+    else:
+        return models.RemProcEvent( timestamp=vd['!meta']['time']
+                                  , ev_type=vd['type'] )
 

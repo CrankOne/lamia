@@ -38,9 +38,18 @@ db.create_all()
 
 from lamia.monitoring.resources.events import Events
 from lamia.monitoring.resources.tasks import Tasks
+from lamia.monitoring.resources.arrays import Arrays
+from lamia.monitoring.resources.jobs import Jobs
 
-api.add_resource(Tasks, '/api/tasks', '/api/tasks/<taskLabel>')
-api.add_resource(Events, '/api/events')
+api.add_resource( Tasks, '/api/v0'
+                       , '/api/v0/<taskLabel>')
+
+api.add_resource(Arrays, '/api/v0/<taskLabel>/arrays'
+                       , '/api/v0/<taskLabel>/arrays/<arrayName>')
+
+api.add_resource(  Jobs, '/api/v0/<taskLabel>/jobs'
+                       , '/api/v0/<taskLabel>/jobs/<jobName>'
+                       , '/api/v0/<taskLabel>/arrays/<arrayName>/<jobNum>' )
 
 #app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
 #app.add_url_rule('/api/events', view_func=Events.as_view('events'))

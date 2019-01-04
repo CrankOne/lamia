@@ -48,8 +48,16 @@ def validate_input( inputSchema ):
                     vd = inputSchema[flask.request.method].validate( flask.request.get_json() )
                 except schema.SchemaError as e:
                     L.exception(e)
-                    return flask.jsonify( { 'error' : 'Input data validation failure.'
-                                          , 'details' : str(e) } ), 400
+                    return { 'errors' : [ { 'errors' : ['Input data validation failure.']
+                                          , 'details' : str(e) }
+                                        ]
+                           } , 400
+                except ValueError as e:
+                    L.exception(e)
+                    return { 'errors' : [ { 'errors' : ['Input data error.']
+                                          , 'details' : str(e) }
+                                        ]
+                           } , 400
             else:
                 if flask.request.method in inputSchema \
                 and inputSchema[flask.request.method] is not None:

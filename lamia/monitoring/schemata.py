@@ -59,7 +59,16 @@ gMetaSignature = schema.Schema({
         'host' : str
     })
 
-# Schema of incoming `event' message.
+updateEventSchema = schema.Schema({
+    '!meta' : gMetaSignature,
+    'type' : schema.And( str
+                       , lambda s : s.lower() in set([v[0] for v in _EV_TYPES.values()])
+                       , schema.Use( event_type_from_str ) ),
+    schema.Optional('exitCode') : schema.Use(int),
+    schema.Optional('payload') : lambda o: type(o) is dict  # arbitrary dict
+})
+
+# Schema of incoming `event' message.  XXX?
 eventSchema = {
     'POST' : schema.Schema({
         '!meta' : gMetaSignature,
@@ -68,9 +77,27 @@ eventSchema = {
         'type' : schema.And( str
                            , lambda s : s.lower() in set(v[0] for v in _EV_TYPES.values())
                            , schema.Use( event_type_from_str ) ),
+        schema.Optional('exitCode') : schema.Use(int),
         schema.Optional('payload') : lambda o: type(o) is dict  # arbitrary dict
     }),
     # ...
+}
+
+# Schemata of single/array jobs (remote processes) requests
+procSchema = {
+    'POST' : schema.Schema({
+        '!meta' : gMetaSignature,
+    }),
+    'PUT' : updateEventSchema
+}
+
+# Schemata of single/array jobs (remote processes) requests
+arraySchema = {
+    'POST' : schema.Schema({
+        '!meta' : gMetaSignature,
+        'nJobs' : schema.And( schema.Use(int), lambda s: int(s) > 0 ),
+        'tolerance' : schema.And( schema.Use(int), lambda s: int(s) > 0 ),
+    }),
 }
 
 # Schema of incoming `new task' message.
@@ -88,11 +115,15 @@ taskSchema = {
     # ...
 }
 
+# The "term" schema. Could be defined:
+#   - as a scalar value (i.a. string)
+#   - as a range: [<from>, <to>] or ["<=", <val>]
+
 # Schemata of incoming search/lookup requests
-gSearchSchema = schema.Schema({
+searchSchema = schema.Schema({
         '!meta' : gMetaSignature,
         'subject' : schema.And(str, lambda s: s in {'task', 'event', 'array', 'job'}),
-        'terms' : { str, str },
+        'terms' : { str : str },
         'values' : [ str ],
         schema.Optional('order') : [ str ]
     })

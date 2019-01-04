@@ -79,6 +79,8 @@ class ProcArray(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     # Usually matches the task's submission time
     submitted = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # Submission host -- usually matches the task's submission host
+    host = db.Column(db.String)
     # Number of jobs within job array (shall match the length of `processes')
     nJobs = db.Column(db.Integer, nullable=False)
     # Array name (non-uniq)
@@ -101,6 +103,10 @@ class ProcArray(db.Model):
                 'taskLabel' : self.task.label
             }
 
+    # See: https://stackoverflow.com/questions/10059345/sqlalchemy-unique-across-multiple-columns
+    #__table_args__ = (UniqueConstraint('customer_id', 'location_code', name='_customer_location_uc'),
+    #                 )
+
 class RemoteProcess(db.Model):
     """
     Remote process representation.
@@ -111,11 +117,7 @@ class RemoteProcess(db.Model):
     """
     __tablename__ = 'processes'
     id = db.Column(db.Integer, primary_key=True)
-    # Usually matches the task's submission time
-    submitted = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    # Return code on exit
-    rc = db.Column(db.Integer)
-    # Events
+    # Events log, associated to process
     events = db.relationship('RemProcEvent', back_populates='process')
     # Polymorphic id
     type = db.Column(db.String(50))
@@ -154,6 +156,10 @@ class StandaloneProcess(RemoteProcess):
     task = db.relationship('BatchTask', back_populates='jobs')
     # If process not within an array: owning task ID
     task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
+    # Usually matches the task's submission time
+    submitted = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # Submission host -- usually matches the task's submission host
+    host = db.Column(db.String)
     # If process not within an array: process name
     name = db.Column(db.String)
     __mapper_args__ = {
@@ -180,7 +186,7 @@ class RemProcEvent(db.Model):
     __tablename__ = 'events'
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    ev_type = db.Column(db.Enum(lamia.monitoring.schemata.RemProcEventType))
+    ev_type = db.Column(db.Enum(lamia.monitoring.schemata.RemProcEventType))  # XXX?
     payload = db.Column(db.String)
     #
     process = db.relationship('RemoteProcess', back_populates='events')
@@ -230,4 +236,3 @@ class RemProcTerminated(RemProcEvent):
         return super().as_dict().update({
                 'resultCode' : self.completion
             })
-
