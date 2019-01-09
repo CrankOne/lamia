@@ -34,18 +34,20 @@ import lamia.monitoring.schemata as schemata
 
 class Tasks(flask_restful.Resource):
     method_decorators = [validate_input(schemata.taskSchema)]
-    def post(self, vd):
+    def post(self, vd, taskLabel):
         resp = { 'created' : False }
         L = logging.getLogger(__name__)
         S = lamia.monitoring.app.db.session
         ct = vd['!meta']['time']
         # We require task label to be unique, so look up for existing one first:
-        t = S.query(models.BatchTask).filter_by(label=vd['label'] ).first()
+        t = S.query(models.BatchTask).filter_by(label=taskLabel ).first()
         if t:
+            resp['errors'] = [{ 'reason' : 'Task name is not unique.'
+                              , 'details' : t.as_dict() }]
             return resp, 409  # conflict
             # see: https://stackoverflow.com/questions/3825990/http-response-code-for-post-when-resource-already-exists
         # Create task
-        t = models.BatchTask( label=vd['label']
+        t = models.BatchTask( label=taskLabel
                             , submitted=ct
                             , dep_graph=vd.get('depGraph', None)
                             , task_type=vd.get('typeLabel', None) )
@@ -73,12 +75,14 @@ class Tasks(flask_restful.Resource):
         resp['created'] = True
         return resp, 201  # created
 
-    def get(self, taskLabel):
+    def get(self, taskLabel=None):
         if not taskLabel:
             return {'errors' : 'No task label given in request.'}, 400
         L = logging.getLogger(__name__)
         S = lamia.monitoring.app.db.session
-        tt = S.query(models.BatchTask).filter_by(label=taskLabel).all()
-        if not tt:
-            return {'errors' : 'No task with label="{}" found.'.format(taskLabel)}, 404
-        return [t.as_dict() for t in tt]
+        if taskLabel:
+            t = S.query(models.BatchTask).filter_by(label=taskLabel).one()
+            return t.as_dict()
+        else:
+            raise NotImplementedError('Retrieval of all tasks is not'
+                    ' yet implemented.')

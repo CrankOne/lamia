@@ -24,6 +24,7 @@ Helper classes and utility functions are to be defined here.
 """
 
 import flask, schema, logging
+import sqlalchemy.orm.exc
 
 def validate_input( inputSchema ):
     """
@@ -41,35 +42,47 @@ def validate_input( inputSchema ):
     def _json_input( f ):
         def _f( *args, **kwargs ):
             L = logging.getLogger(__name__)
-            if flask.request.method in inputSchema \
-            and inputSchema[flask.request.method] is not None:
-                try:
-                    # TODO: support XML?
-                    vd = inputSchema[flask.request.method].validate( flask.request.get_json() )
-                except schema.SchemaError as e:
-                    L.exception(e)
-                    return { 'errors' : [ { 'errors' : ['Input data validation failure.']
-                                          , 'details' : str(e) }
-                                        ]
-                           } , 400
-                except ValueError as e:
-                    L.exception(e)
-                    return { 'errors' : [ { 'errors' : ['Input data error.']
-                                          , 'details' : str(e) }
-                                        ]
-                           } , 400
-            else:
+            try:
                 if flask.request.method in inputSchema \
                 and inputSchema[flask.request.method] is not None:
-                    L.warning( 'No input schema defined for method "{method}" of the '
-                        'resource "{resourceName}."'.format(
-                            method=flask.request.method,
-                            resourceName=f.__name__ ) )
+                    # TODO: support XML?
+                    vd = inputSchema[flask.request.method].validate( flask.request.get_json() )
                 else:
-                    # The schema is explicitly set to None, no data to transfer
-                    # from request
-                    return f( *args, **kwargs )
-            return f( vd, *args, **kwargs )
+                    if flask.request.method in inputSchema \
+                    and inputSchema[flask.request.method] is not None:
+                        L.warning( 'No input schema defined for method "{method}" of the '
+                            'resource "{resourceName}."'.format(
+                                method=flask.request.method,
+                                resourceName=f.__name__ ) )
+                    else:
+                        # The schema is explicitly set to None, no data to transfer
+                        # from request
+                        return f( *args, **kwargs )
+                return f( vd, *args, **kwargs )
+            except schema.SchemaError as e:
+                L.exception(e)
+                return { 'errors' : [ { 'reason' : 'Input data validation failure.'
+                                      , 'details' : str(e) }
+                                    ]
+                       } , 400
+            except sqlalchemy.orm.exc.NoResultFound as e:
+                L.exception(e)
+                return { 'errors' : [ { 'reason' : 'No data found for query.'
+                                      , 'details' : str(e) }
+                                    ]
+                       } , 404
+            except ValueError as e:
+                L.exception(e)
+                return { 'errors' : [ { 'reason' : 'Input data error.'
+                                      , 'details' : str(e) }
+                                    ]
+                       } , 400
+            except Exception as e:
+                L.exception(e)
+                return { 'errors' : [ { 'reason' : 'Generic server error.'
+                                      , 'details' : str(e) }
+                                    ]
+                       }, 500
         #_f.__name__ = f.__name__
         return _f
     return _json_input

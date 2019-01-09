@@ -22,6 +22,8 @@
 """
 View defining jobs as a resource.
 
+This REST interface is responsible for both standalone and array jobs.
+
 No HATEOAS currently implemented.
 """
 
@@ -86,10 +88,12 @@ class Jobs(flask_restful.Resource):
         return {'created' : True}, 201
 
 
-    def put( self, vd, taskLabel
+    def patch( self, vd, taskLabel
            , jobName=None, arrayName=None, jobNum=None):
         """
-        Expects process status updating events.
+        Treats process status updating events: started, submitted, heartbeat,
+        terminated.
+        Response data may contain some guidance information about 
         """
         L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
         cTime, cHost = vd['!meta']['time'], vd['!meta']['host']
@@ -106,19 +110,28 @@ class Jobs(flask_restful.Resource):
             p.events.append(eve)
             S.add(eve)
             S.commit()
-            return {'created' : True}
+            return {'created' : True}, 200
         elif arrayName and jobNum:
             # models.ArrayProcess
-            array
+            raise NotImplementedError('Array job updates aren\'t yet implemented.')
         else:
             raise ValueError('No job name identifier provided.')
-        #S.add(p)
-        #S.commit()
-        #if jobName:
-        #    L.info( "{host}:{time} :: Created standalone job, id={id_}".format(
-        #        host=cHost, time=unicode(cTime), id_=p.id ) )
-        #else:
-        #    L.info( "{host}:{time} :: Created array job, id={id_}".format(
-        #        host=cHost, time=unicode(cTime), id_=p.id ) )
-        #return {'created' : True}, 201
 
+    def get( self, taskLabel
+           , jobName=None, arrayName=None, jobNum=None):
+        L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
+        # We require task label to be unique, so look up for existing one first:
+        #t = S.query(models.BatchTask).filter_by( label=taskLabel ).one()
+        if jobName and arrayName:
+            raise ValueError('Both "jobName" and "arrayName" parameters provided.')
+        elif jobName:
+            p = S.query( models.StandaloneProcess ).join( models.BatchTask ) \
+                    .filter( models.BatchTask.id == models.StandaloneProcess.task_id ) \
+                    .filter( models.BatchTask.label == taskLabel ) \
+                    .filter( models.StandaloneProcess.name == jobName ).one()
+            return p.as_dict()
+        elif arrayName and jobNum:
+            # models.ArrayProcess
+            raise NotImplementedError('Array job retrieval isn\'t yet implemented.')
+        else:
+            raise ValueError('No job name identifier provided.')

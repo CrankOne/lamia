@@ -23,12 +23,18 @@ Lamia provides rudimentary support for monitoring of the running processes via
 RESTful API. This module declares object relational model for running tasks.
 
 Three classes below defines the general ORM: Task, Array and Process.
+
+For multiple unique constrain, see:
+    https://stackoverflow.com/questions/10059345/sqlalchemy-unique-across-multiple-columns
 """
 
 import datetime, enum, itertools, json
-import lamia.monitoring.schemata
 import base64, bz2, pickle  # for dependency graph
+
+import lamia.monitoring.schemata
 from lamia.monitoring.app import db
+
+import sqlalchemy.schema
 from sqlalchemy.ext.declarative import DeclarativeMeta
 
 class BatchTask(db.Model):
@@ -93,6 +99,8 @@ class ProcArray(db.Model):
     task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
     # Processes within the array
     processes = db.relationship("ArrayProcess", back_populates='array')
+    __table_args__ = (sqlalchemy.schema.UniqueConstraint( 'task_id', 'name'
+                                                        , name='_array_name_uc'),)
 
     def as_dict(self):
         return {
@@ -102,10 +110,6 @@ class ProcArray(db.Model):
                 'tolerance' : self.fTolerance,
                 'taskLabel' : self.task.label
             }
-
-    # See: https://stackoverflow.com/questions/10059345/sqlalchemy-unique-across-multiple-columns
-    #__table_args__ = (UniqueConstraint('customer_id', 'location_code', name='_customer_location_uc'),
-    #                 )
 
 class RemoteProcess(db.Model):
     """
@@ -129,30 +133,34 @@ class RemoteProcess(db.Model):
     def as_dict(self):
         return {
                 'submitted' : '{}'.format(self.submitted.timestamp()),
-                'rc' : self.rc,
                 'nEvents' : len(self.events),
                 # ... other by descendants
             }
 
 class ArrayProcess(RemoteProcess):
     __tablename__ = 'array_jobs'
+    id = db.Column(db.Integer, db.ForeignKey('processes.id'), primary_key=True)
     array = db.relationship('ProcArray', back_populates='processes')
     # If process within an array: parent array's id, if any
     array_id = db.Column(db.Integer, db.ForeignKey('arrays.id'))
     # If process within an array: job index (number in array)
     job_num = db.Column(db.Integer)
+
     __mapper_args__ = {
         'polymorphic_identity':'array_jobs',
     }
 
     def as_dict(self):
-        return super().as_dict().update({
+        d = super().as_dict()
+        d.update({
                 'array' : self.array.name,
                 'nJob' : self.job_num
             })
+        return d
 
 class StandaloneProcess(RemoteProcess):
     __tablename__ = 'standalone_jobs'
+    id = db.Column(db.Integer, db.ForeignKey('processes.id'), primary_key=True)
     task = db.relationship('BatchTask', back_populates='jobs')
     # If process not within an array: owning task ID
     task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
@@ -164,13 +172,18 @@ class StandaloneProcess(RemoteProcess):
     name = db.Column(db.String)
     __mapper_args__ = {
         'polymorphic_identity':'standalone_jobs',
+        #'polymorphic_identity' : ,
     }
+    __table_args__ = (sqlalchemy.schema.UniqueConstraint( 'task_id', 'name'
+                                                        , name='_task_name_uc'),)
 
     def as_dict(self):
-        return super().as_dict().update({
+        d = super().as_dict()
+        d.update({
                 'task' : self.task.label,
                 'name' : self.name
             })
+        return d
 
 class RemProcEvent(db.Model):
     """
@@ -220,9 +233,11 @@ class RemProcBeatProgress(RemProcEvent):
     __mapper_args__ = { 'polymorphic_identity':'progress_beats' }
 
     def as_dict(self):
-        return super().as_dict().update({
+        d = super().as_dict()
+        d.update({
                 'progress' : (self.progress_current, self.progress_uplimit)
             })
+        return d
 
 class RemProcTerminated(RemProcEvent):
     """
@@ -233,6 +248,8 @@ class RemProcTerminated(RemProcEvent):
     __mapper_args__ = { 'polymorphic_identity':'termination_events' }
 
     def as_dict(self):
-        return super().as_dict().update({
+        d = super().as_dict()
+        d.update({
                 'resultCode' : self.completion
             })
+        return d

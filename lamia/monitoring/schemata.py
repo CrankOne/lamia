@@ -104,7 +104,6 @@ arraySchema = {
 taskSchema = {
     'POST' : schema.Schema({
         '!meta' : gMetaSignature,
-        'label' : str,
         'typeLabel' : str,
         'config' : lambda o: type(o) is dict,  # arbitrary dict
         schema.Optional('depGraph') : str,
