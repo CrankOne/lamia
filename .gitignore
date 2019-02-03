@@ -24,3 +24,4 @@ logs/*
 cdr11001-283302.raw
 .venv*/
 *.egg-info/*
+lamia/monitoring/test/mocklog

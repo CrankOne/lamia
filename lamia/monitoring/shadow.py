@@ -19,7 +19,7 @@ In case when host pointed by -a,--out-addr is not available, or when there
 are no active service, the script will become darmant, meaning no events will
 be issued. It will quietly die once the target process is done.
 
-Consider prefixing command `stdbuf -oL` in order to force line-based
+NOTE: consider prefixing command `stdbuf -oL` in order to force line-based
 bufferization of target commands.
 """
 
@@ -135,16 +135,16 @@ p.add_argument( '-t', '--task'
               ' tasks.'
               , required=True )
 p.add_argument( '-s', '--signature'
-              , help='Signature of this remote process for Lamia monitoring\n'
-              'service. Shall be either a string denoting standalone\njobs:'
-              ' <processName> or <arrayName>:<jobNo> signing the\njobs array'
+              , help='Signature of this remote process for Lamia monitoring'
+              ' service. Shall be either a string denoting standalone jobs:'
+              ' <processName> or <arrayName>:<jobNo> signing the jobs array'
               ' process.'
               , required=True )
 p.add_argument( '--api-ver'
               , help='Lamia REST API version to use.'
               , default='0' )
 p.add_argument( '-i', '--insist'
-              , help='When set, ignore the "no need" recommendation\nfrom'
+              , help='When set, ignore the "no need" recommendation from'
               ' monitoring service.'
               , action='store_true')
 p.add_argument( '-E', '--use-stderr'
