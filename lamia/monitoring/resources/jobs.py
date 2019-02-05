@@ -31,6 +31,7 @@ import flask_restful
 import lamia.monitoring.orm as models
 import flask, logging, json, schema
 import lamia.monitoring.app
+import lamia.monitoring.resources.events
 from lamia.monitoring.resources import validate_input
 import lamia.monitoring.schemata as schemata
 
@@ -93,12 +94,12 @@ class Jobs(flask_restful.Resource):
         """
         Treats process status updating events: started, submitted, heartbeat,
         terminated.
-        Response data may contain some guidance information about 
         """
         L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
         cTime, cHost = vd['!meta']['time'], vd['!meta']['host']
         # We require task label to be unique, so look up for existing one first:
         #t = S.query(models.BatchTask).filter_by( label=taskLabel ).one()
+        epKwArgs = { 'taskLabel' : taskLabel }
         if jobName and arrayName:
             raise ValueError('Both "jobName" and "arrayName" parameters provided.')
         elif jobName:
@@ -110,9 +111,14 @@ class Jobs(flask_restful.Resource):
             p.events.append(eve)
             S.add(eve)
             S.commit()
-            return {'created' : True}, 200
+            epKwArgs.update({ 'jobName' : jobName, 'eventID' : eve.id })
+            return { 'created' : True
+                   , 'addr' : flask.url_for( 'Events', **epKwArgs ) }, 201
         elif arrayName and jobNum:
             # models.ArrayProcess
+            epKwArgs.update({ 'arrayName' : arrayName
+                            , 'jobNum' : jobNum
+                            , 'eventID' : eve.id })
             raise NotImplementedError('Array job updates aren\'t yet implemented.')
         else:
             raise ValueError('No job name identifier provided.')

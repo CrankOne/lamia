@@ -22,6 +22,8 @@
 """
 Entities reflects the events happening with the particular process.
 Their lyfecycle does not imply direct deletion or update.
+
+Insertion of event must be performed with PATCH'ing corresponding job instance.
 """
 
 import flask_restful
@@ -33,7 +35,10 @@ import lamia.monitoring.schemata as schemata
 
 class Events(flask_restful.Resource):
     method_decorators = [validate_input(schemata.eventSchema)]
-    def post(self, vd):
+    def _xxx_post(self, vd):
+        """
+        TODO: Delete this!
+        """
         resp = { 'valid' : False
                , 'taskID' : None
                , 'redundant' : False
@@ -91,4 +96,12 @@ class Events(flask_restful.Resource):
         resp['eventID'] = eve.id
         #L.debug('Considered event of type ... from host ...')
         return resp, 201
+
+    def get( self, taskLabel, eventID
+           , jobName=None, arrayName=None, jobNum=None ):
+        raise NotImplementedError()
+
+    def post( self, taskLabel, eventID
+           , jobName=None, arrayName=None, jobNum=None ):
+        raise NotImplementedError()
 

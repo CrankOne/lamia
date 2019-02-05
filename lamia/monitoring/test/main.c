@@ -41,15 +41,19 @@ print_usage(const char * appName, FILE * f) {
 
 static int
 _fromfile_printing() {
-    char line[1024], * rd;
-    FILE * srcf = 0;
+    char line[1024], * rd, nStream;
+    FILE * srcf = 0
+       , * dstf = 0;
     if( !config.srcFiles[0] && !config.srcFiles[1] ) {
         fprintf(stderr, "Error: no input file given!\n");
         return EXIT_FAILURE;
     } else if ( config.srcFiles[0] && config.srcFiles[1] ) {
-        srcf = config.srcFiles[rand()%2];
+        nStream = rand()%2;
+        srcf = config.srcFiles[(int) nStream];
+        dstf = nStream ? stderr : stdout;
     } else {
         srcf = config.srcFiles[0] ? config.srcFiles[0] : config.srcFiles[1];
+        dstf = config.srcFiles[0] ? stdout : stderr;
     }
     # ifdef DEBUG
     {
@@ -68,7 +72,7 @@ _fromfile_printing() {
             do {
                 rd = fgets(line, sizeof(line), srcf);
                 if( rd ) {
-                    fputs(line, stdout);
+                    fputs(line, dstf);
                 } else {
                     return 1;
                 }
@@ -77,7 +81,7 @@ _fromfile_printing() {
             /* read and print single line from file */
             rd = fgets( line, sizeof(line), srcf );
             if( rd ) {
-                fputs( line, stdout );
+                fputs( line, dstf );
             } else {
                 return 1;
             }

@@ -76,13 +76,35 @@ class Tasks(flask_restful.Resource):
         return resp, 201  # created
 
     def get(self, taskLabel=None):
-        if not taskLabel:
-            return {'errors' : 'No task label given in request.'}, 400
         L = logging.getLogger(__name__)
         S = lamia.monitoring.app.db.session
         if taskLabel:
             t = S.query(models.BatchTask).filter_by(label=taskLabel).one()
             return t.as_dict()
         else:
-            raise NotImplementedError('Retrieval of all tasks is not'
-                    ' yet implemented.')
+            ts = S.query(models.BatchTask).all()
+            res = { 'tasks' : [] }
+            for t in ts:
+                res['tasks'].append( t.as_dict() )
+                res['tasks'][-1]['!links'] = {
+                        'href' : flask.url_for('tasks', taskLabel=t.label),
+                        'methods' : ['POST', 'GET', 'DELETE']
+                }
+            return res, 200
+
+    def delete(self, taskLabel=None):
+        """
+        Perform deletion of particular task or all the task indexed in table.
+        """
+        L = logging.getLogger(__name__)
+        S = lamia.monitoring.app.db.session
+        if taskLabel is None:
+            if not lamia.monitoring.app.app.debug:
+                return {
+                        'error' : 'By security reasons, batch deletion of all '
+                            'tasks is allowed only in debug mode.'
+                    }, 403
+            else:
+                nEntries = S.query(models.BatchTask).delete()
+                S.commit()
+                return { 'deleted' : nEntries }, 200

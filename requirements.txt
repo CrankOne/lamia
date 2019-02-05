@@ -6,3 +6,7 @@ bidict
 asciitree
 htcondor
 networkx
+flask
+flask_sqlalchemy
+flask_restful
+schema

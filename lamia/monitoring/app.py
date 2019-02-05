@@ -51,6 +51,9 @@ api.add_resource(  Jobs, '/api/v0/<taskLabel>/jobs'
                        , '/api/v0/<taskLabel>/jobs/<jobName>'
                        , '/api/v0/<taskLabel>/arrays/<arrayName>/<jobNum>' )
 
+api.add_resource(Events, '/api/v0/<taskLabel>/jobs/<jobName>/<eventID>'
+                       , '/api/v0/<taskLabel>/arrays/<arrayName>/<jobNum>/<eventID>' )
+
 #app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
 #app.add_url_rule('/api/events', view_func=Events.as_view('events'))
 

@@ -51,7 +51,7 @@ class BatchTask(db.Model):
     # bz2 compressed, base64-encoded representation of networkx DiGraph
     dep_graph = db.Column(db.String)
     # List of arrays associated with the task, if any
-    arrays = db.relationship('ProcArray', back_populates='task')
+    arrays = db.relationship('ProcArray', back_populates='task', cascade='all, delete-orphan')
     # List of individual jobs associated with the task, if any (not included
     # into arrays list)
     jobs = db.relationship("StandaloneProcess", back_populates='task')
@@ -94,7 +94,7 @@ class ProcArray(db.Model):
     # Might not be set, indicating no failure tolerance here
     fTolerance = db.Column(db.Integer, nullable=True)
     #
-    task = db.relationship('BatchTask', back_populates='arrays')
+    task = db.relationship('BatchTask', back_populates='arrays', single_parent=True)
     # Task to which this array is attached
     task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
     # Processes within the array
