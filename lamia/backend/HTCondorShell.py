@@ -24,7 +24,7 @@ The shell utilities to the HTCondor facility is the most elaborated way to
 interact with its interfaces (and actually an only full-fledged one).
 """
 import logging, re, os, copy, subprocess, itertools, networkx, functools, io \
-     , hashlib, base64
+     , hashlib, base64, pickle, bz2
 import sys  # XXX
 # uncomment this and few lines below for @native-graph-drawing
 #import pylab
@@ -337,6 +337,19 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         #A = to_agraph(G)
         #A.layout('dot')
         #A.draw('/tmp/DAG-2.png')
+        # _________
+        # TODO: we're done with main part and now are going to notify the
+        # monitoring server with job being submitted. Code below is highly
+        # experimental: we write pickled representation of the dependency
+        # graph and encode it into base64 to be then sent to the monitoring
+        # server:
+        #dgpckl = io.BytesIO()
+        #networkx.write_gpickle(G, dgpckl)
+        ##pickle.dump( G, dgpckl )
+        #with open( './xxx.base64', 'w' ) as f:
+        #    f.write(base64.b64encode(bz2.compress(dgpckl.getvalue())).decode())
+        #assert(False)  # XXX
+        # _________
         with open(DAGFilePath, 'w') as f:
             f.write(dagf.getvalue())
         sCmd = [self.cfg['execs']['submitDAG'], '-force', DAGFilePath]
