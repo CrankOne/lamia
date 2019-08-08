@@ -28,7 +28,7 @@ Uses jinja2 as template-rendering framework to produce dynamic templates.
 import yaml, os, fnmatch, logging, datetime, copy, re
 #import jinja2schema  # TODO: 1-vars-infer
 import jinja2 as j2
-import jinja2.lexer, jinja2.ext
+import jinja2.lexer, jinja2.ext, jinja2.exceptions, jinja2.nodes
 import lamia.core.configuration as LC
 import lamia.core.filesystem as FS
 
@@ -73,6 +73,36 @@ class AbsPathFilter(object):
         if os.path.isabs( relPath ):
             return os.path.normpath(relPath)
         return os.path.join( self._base, relPath )
+
+class RaiseExtension(jinja2.ext.Extension):
+    """
+    Jinja2 extension to raise exception.
+    Despite it violates the general goal of the template-rendering engine, its
+    usage might be sometimes justified: when template depends on user's input.
+    For implementation details see:
+        https://stackoverflow.com/questions/21778252/how-to-raise-an-exception-in-a-jinja2-macro
+    """
+    # This is our keyword(s):
+    tags = set(['raise'])
+
+    # See also: jinja2.parser.parse_include()
+    def parse(self, parser):
+        # the first token is the token that started the tag. In our case we
+        # only listen to "raise" so this will be a name token with
+        # "raise" as value. We get the line number so that we can give
+        # that line number to the nodes we insert.
+        lineno = next(parser.stream).lineno
+
+        # Extract the message from the template
+        message_node = parser.parse_expression()
+
+        return jinja2.nodes.CallBlock(
+            self.call_method('_raise', [message_node], lineno=lineno),
+            [], [], [], lineno=lineno
+        )
+
+    def _raise(self, msg, caller):
+        raise jinja2.exceptions.TemplateRuntimeError(msg)
 
 class Loader(j2.BaseLoader):
     """

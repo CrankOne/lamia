@@ -97,7 +97,8 @@ class TemplateEnvironment(object):
             self._templates = lamia.core.templates.Templates( self.templatesDirs
                                       , loaderInterpolators=self.tli
                                       , additionalFilters=self.filters
-                                      , extensions=['jinja2.ext.do'] )
+                                      , extensions=[ 'jinja2.ext.do'
+                                                   , 'lamia.core.templates.RaiseExtension'] )
             del self.templatesDirs
         return self._templates
 #                               *** *** ***

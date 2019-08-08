@@ -245,7 +245,8 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
             self._templates = lamia.core.templates.Templates( pd
                                       , loaderInterpolators=self.tli
                                       , additionalFilters=self.filters
-                                      , extensions=['jinja2.ext.do'] )
+                                      , extensions=[ 'jinja2.ext.do'
+                                                   , 'lamia.core.templates.RaiseExtension' ] )
             del self.templatesDirs
         return self._templates
 

@@ -5,11 +5,11 @@ back-ends (like IBM LSF or HTCondor) by introducing additional interface
 offering extended abilities for configuration.
 
 The practical need of such an extension comes from the fact that most of our
-scientific software does not support configuration mechanisms that might be
-easily integrated with existing batch-scheduling roughly-similar solutions like
+scientific software does not support versatile enough configuration mechanisms
+that might be easily integrated with existing batch-scheduling solutions like
 [Luigi](https://luigi.readthedocs.io/en/stable/index.html),
 [Airflow](https://airflow.apache.org/), [Oozie](http://oozie.apache.org/), or
-[Azkaban](http://data.linkedin.com/opensource/azkaban). These solutions
+[Azkaban](http://data.linkedin.com/opensource/azkaban). This projects
 were designed to simplify the scheduling and their focus lies on the
 conditioning of the workflow dependencies.
 
@@ -25,9 +25,8 @@ the individual batch jobs and tasks with well-known and rigid workflows:
    integration ELK stack, extracting of task-specific information, journaling,
    cataloguing, etc.
 
-Since the project is in prototyping stage, no online documentation offered here
-so far, unfortunately. If you are really interested, you may consider to study
-existing practical project.
+Since the project is yet on pretty early stage of development, no online
+documentation offered here so far, unfortunately.
 
 # History and features
 
@@ -57,44 +56,32 @@ structures and higly-volatile configs/text files, etc. The Lamia offers a
 generalized way to provide dynamic execution context for them by customizing
 the local filesystem subtree with templated approach.
 
+# Concepts
 
-# Templates
+We've tried to introduce very few concepts to the stage in order to keep things
+clear.
+
+## Templates
 
 Template-rendering utils are based on [Jinja2](http://jinja.pocoo.org) package.
 Once running, Lamia tools collect the templates located in pre-defined
 directories. These templates then are usually referred within the _file
 structure manifest_ describing the deployment environment of particular tasks.
 
-## Reserved context definitions
-
-The special variable `LAMIA` defined during context-rendering procedure have
-few sections that reflects volatile run-time conditions, specific for
-particular file instance:
-
-    * `LAMIA.path` is the path of file currently being rendered
-    * `LAMIA.pathContext` is the subset of variables interpolated by path
-currently being rendered. For example, if path was `options{iteration}.txt` and
-`iteration` was set to `[1, 2, 3]`, the `LAMIA.pathContext.iteration` will
-refer to particular value of `{iteration}`: `1` for `options1.txt`, `2` for
-`options2.txt`, etc.
-    * `LAMIA.subtree` refers to the subtree object being currenlty rendered.
-This object is an instance of `lamia.core.filesystem.Paths`. It might be used
-to retrieve the aliased paths from within a template rendering context.
-
-# Filesystem
+## Filesystem
 
 The _file structure manifest_ is usually declared in a form of YAML documents,
 where keys expected to be in a special form. These keys are sometimes template
 string upon which the Lamia computes cartesian product to defer exact names for
 file structure.
 
-# Monitoring API
+## Monitoring API
 
 Lamia introduces a simple RESTful API for monitoring of the running jobs. The
 API is built around the "task" object in a way each resource refers to the
 owning task instance by its unique name.
 
-## ORM
+### ORM
 
 Simplified relation between principle entities are depicted on the diagram.
 Traits:
@@ -121,7 +108,23 @@ termination (but user API may). The termination event is used in some
 pre-defined search queries to determine whether the job, array or entire task
 sucessfully finished its evaluation.
 
-## Requests semantics
+## Reserved context definitions
+
+The special variable `LAMIA` defined during context-rendering procedure have
+few sections that reflects volatile run-time conditions, specific for
+particular file instance:
+
+    * `LAMIA.path` is the path of file currently being rendered
+    * `LAMIA.pathContext` is the subset of variables interpolated by path
+currently being rendered. For example, if path was `options{iteration}.txt` and
+`iteration` was set to `[1, 2, 3]`, the `LAMIA.pathContext.iteration` will
+refer to particular value of `{iteration}`: `1` for `options1.txt`, `2` for
+`options2.txt`, etc.
+    * `LAMIA.subtree` refers to the subtree object being currenlty rendered.
+This object is an instance of `lamia.core.filesystem.Paths`. It might be used
+to retrieve the aliased paths from within a template rendering context.
+
+## REST Requests Semantics
 
 Methods usually have the following semantics:
 
