@@ -32,6 +32,33 @@ import jinja2.lexer, jinja2.ext, jinja2.exceptions, jinja2.nodes
 import lamia.core.configuration as LC
 import lamia.core.filesystem as FS
 
+from jinja2 import nodes
+from jinja2.ext import Extension
+from jinja2.exceptions import TemplateRuntimeError
+
+class RaiseExtension(Extension):
+    # This is our keyword(s):
+    tags = set(['raise'])
+
+    # See also: jinja2.parser.parse_include()
+    def parse(self, parser):
+        # the first token is the token that started the tag. In our case we
+        # only listen to "raise" so this will be a name token with
+        # "raise" as value. We get the line number so that we can give
+        # that line number to the nodes we insert.
+        lineno = next(parser.stream).lineno
+
+        # Extract the message from the template
+        message_node = parser.parse_expression()
+
+        return nodes.CallBlock(
+            self.call_method('_raise', [message_node], lineno=lineno),
+            [], [], [], lineno=lineno
+        )
+
+    def _raise(self, msg, caller):
+        raise TemplateRuntimeError(msg)
+
 # Template files regex (any file, except hidden ones and swap files produced
 # by some editors/IDEs).
 rxTemplateFilePat = re.compile(r'^(?P<dir>.+\/)?(?P<filename>[^.~#]\w*)(?:\.(?P<extension>\w+))?$')
@@ -289,6 +316,7 @@ class Templates(object):
                 , additionalFilters={}
                 , extensions=[] ):
         L = logging.getLogger(__name__)
+        L.info( 'Enabled templates extensions: %s.'%(', '.join(extensions)) )
         # Require target dir to be accessible and actually a dir (or a symlink
         # to dir)
         for d in templatesDirs:
