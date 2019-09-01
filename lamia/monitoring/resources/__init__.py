@@ -23,13 +23,14 @@
 Helper classes and utility functions are to be defined here.
 """
 
-import flask, schema, logging
+import flask, schema, logging, inspect
 import sqlalchemy.orm.exc
+import lamia.monitoring.app
 
 def validate_input( inputSchema ):
     """
     Parameterized decorator performing validation of input data (JSON)
-    against provided python schema.
+    against provided marshmellow schema.
 
     If data is valid, it will be provided as a first argument to the forwarded
     (decorated) function.
@@ -40,24 +41,50 @@ def validate_input( inputSchema ):
     TODO: support XML?
     """
     def _json_input( f ):
+        #vSchema = inputSchema.get( f.__n )
+        hasSchema = f.__name__.upper() in inputSchema
+        # Do a trick: extract the names from the function signature to build a
+        # named dictionary from basic URL arguments and append the JSON data
+        # with them to conjugate info into a single object
+        signature = inspect.Signature.from_callable(f)
+        # TODO: it is hard to understand which ones are cought by Werkzeug, but
+        # details available:
+        #   - https://werkzeug.palletsprojects.com/en/0.15.x/routing/
+        # note there a `MapAdapter' section that explains mechanism in details.
+        argNames = tuple( (p.name, p.default is not inspect.Parameter.empty ) \
+                     for nm, p in signature.parameters.items() \
+                         if p.kind in ( inspect.Parameter.POSITIONAL_ONLY
+                                      , inspect.Parameter.POSITIONAL_OR_KEYWORD) )
         def _f( *args, **kwargs ):
             L = logging.getLogger(__name__)
             try:
-                if flask.request.method in inputSchema \
-                and inputSchema[flask.request.method] is not None:
-                    # TODO: support XML?
-                    vd = inputSchema[flask.request.method].validate( flask.request.get_json() )
-                else:
-                    if flask.request.method in inputSchema \
-                    and inputSchema[flask.request.method] is not None:
-                        L.warning( 'No input schema defined for method "{method}" of the '
-                            'resource "{resourceName}."'.format(
-                                method=flask.request.method,
-                                resourceName=f.__name__ ) )
-                    else:
-                        # The schema is explicitly set to None, no data to transfer
-                        # from request
-                        return f( *args, **kwargs )
+                if not hasSchema:
+                    L.warning( 'No input schema defined for method "{method}"'
+                        ' of the resource "{resourceName}."'.format(
+                                        method=flask.request.method,
+                                        resourceName=f.__name__.upper() # TODO: retrieve class name?
+                                    ) )
+                    return f( *args, **kwargs )
+                vd = flask.request.get_json()
+                for k in list(kwargs.keys()):
+                    if not k.startswith('_'):
+                        vd[k] = kwargs.pop(k)
+                argsNamesSet = set( p[0] for p in argNames )
+                if '_meta' in argsNamesSet:
+                    # TODO: valudate meta info vs. schema:
+                    kwargs['_meta'] = vd.pop('_meta', None)
+                if '_data' in argsNamesSet:
+                    kwargs['_data'] = vd
+                if '_schema' in argsNamesSet:
+                    kwargs['_schema'] = inputSchema[flask.request.method]
+                vd.update(dict((k, v) for k, v in kwargs.items() if not k.startswith('_') ))
+                errors = inputSchema[flask.request.method].validate( vd )
+                if errors:
+                    # Upon errors appeared, return the list
+                    return { 'errors' : [ { 'reason' : 'Input data invalid.'
+                                          , 'details' : errors }
+                                        ]
+                           }, 400
                 return f( vd, *args, **kwargs )
             except schema.SchemaError as e:
                 L.exception(e)

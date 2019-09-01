@@ -28,164 +28,93 @@ For multiple unique constrain, see:
     https://stackoverflow.com/questions/10059345/sqlalchemy-unique-across-multiple-columns
 """
 
-import datetime, enum, itertools, json
+import datetime, enum, itertools, json, enum
 import base64, bz2, pickle  # for dependency graph
 
-import lamia.monitoring.schemata
 from lamia.monitoring.app import db
 
 import sqlalchemy.schema
 from sqlalchemy.ext.declarative import DeclarativeMeta
 
-class BatchTask(db.Model):
+class Task(db.Model):
     """
     A task representation: contains references to arrays of processes and
     individual processes running within a single task context.
     """
     __tablename__ = 'tasks'
-    id = db.Column(db.Integer, primary_key=True)
     # Unique label of the particular task
-    label = db.Column(db.String, unique=True, nullable=False)
+    name = db.Column(db.String, primary_key=True)
+    #id = db.Column(db.Integer, primary_key=True)
+    # Task type tag, optional
+    taskClass = db.Column(db.String)
     # Task submission time and date
-    submitted = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    submittedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # Task completion time and data
+    completedAt = db.Column(db.DateTime)
     # bz2 compressed, base64-encoded representation of networkx DiGraph
-    dep_graph = db.Column(db.String)
+    depGraph = db.Column(db.String)
+    # Task config
+    config = db.Column(db.String)  # TODO: db.Column(db.JSON) ?
     # List of arrays associated with the task, if any
-    arrays = db.relationship('ProcArray', back_populates='task', cascade='all, delete-orphan')
+    #arrays = db.relationship('ProcArray', back_populates='task', cascade='all, delete-orphan')
     # List of individual jobs associated with the task, if any (not included
     # into arrays list)
-    jobs = db.relationship("StandaloneProcess", back_populates='task')
-    # Task type tag, optional
-    task_type = db.Column(db.String)
+    processes = db.relationship( "Process"
+                                , back_populates='task')
 
-    def dependecy_graph(self):
+    def get_graph(self):
         """
         Returns an instance of networkx' DiGraph or None.
         """
         pickle.loads(bz2.decompress(base64.b64decode(self.dep_graph))) if self.dep_graph else None
 
-    def as_dict(self):
-        return {
-                'label' : self.label,
-                'submitted' : '{}'.format(self.submitted.timestamp()),
-                'depGraph' : self.dep_graph,
-                'arrays' : [a.name for a in self.arrays],
-                'jobs' : [j.name for j in self.jobs],
-                'taskType' : self.task_type
-            }
+kStandaloneProcess = 0x1
+kArrayProcess = 0x3
 
-class ProcArray(db.Model):
+class Process(db.Model):
     """
-    Multiple processes may be unified within one processes array. The
+    Remote process abstraction.
+    """
+    __tablename__ = 'processes'
+    # If process not within an array: process name
+    name = db.Column(db.String, primary_key=True)
+    # If process not within an array: owning task ID
+    taskID = db.Column(db.String, db.ForeignKey('tasks.name'), primary_key=True)
+    task = db.relationship('Task', back_populates='processes')
+    # Usually matches the task's submission time
+    submittedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # Events log, associated to process
+    events = db.relationship( 'Event'
+                            , back_populates='process')
+    # Polymorphic id
+    kin = db.Column(db.Integer)
+    __mapper_args__ = {
+        'polymorphic_on': kin,
+        'polymorphic_identity': kStandaloneProcess
+    }
+    #__table_args__ = (sqlalchemy.schema.UniqueConstraint( 'taskID', 'name'
+    #                                                    , name='_task_name_uc'),)
+
+class Array(Process):
+    """
+    Multiple physical processes may be unified within one processes array. The
     additional property of this model is fault tolerance: number of the
     processes within the array that might end up with failure but the array
     has to be still considered as successfull.
     """
     __tablename__ = 'arrays'
-    id = db.Column(db.Integer, primary_key=True)
-    # Usually matches the task's submission time
-    submitted = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    # Submission host -- usually matches the task's submission host
-    host = db.Column(db.String)
+    name = db.Column(db.String, primary_key=True)
+    taskID = db.Column(db.String, primary_key=True)
     # Number of jobs within job array (shall match the length of `processes')
     nJobs = db.Column(db.Integer, nullable=False)
-    # Array name (non-uniq)
-    name = db.Column(db.String)
     # Might not be set, indicating no failure tolerance here
     fTolerance = db.Column(db.Integer, nullable=True)
-    #
-    task = db.relationship('BatchTask', back_populates='arrays', single_parent=True)
-    # Task to which this array is attached
-    task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
-    # Processes within the array
-    processes = db.relationship("ArrayProcess", back_populates='array')
-    __table_args__ = (sqlalchemy.schema.UniqueConstraint( 'task_id', 'name'
-                                                        , name='_array_name_uc'),)
+    __mapper_args__ = { 'polymorphic_identity': kArrayProcess }
+    __table_args__ = (sqlalchemy.schema.ForeignKeyConstraint([name, taskID],
+                                                             [Process.name, Process.taskID]),
+                      {})
 
-    def as_dict(self):
-        return {
-                'submitted' : '{}'.format(self.submitted.timestamp()),
-                'nJobs' : self.nJobs,
-                'name' : self.name,
-                'tolerance' : self.fTolerance,
-                'taskLabel' : self.task.label
-            }
-
-class RemoteProcess(db.Model):
-    """
-    Remote process representation.
-
-    Entries should rather track a virtual representation of process, ignoring
-    the history of "real" processes running on certain host. I.e. the evicted
-    process starting on another host must be considered as the same process.
-    """
-    __tablename__ = 'processes'
-    id = db.Column(db.Integer, primary_key=True)
-    # Events log, associated to process
-    events = db.relationship('RemProcEvent', back_populates='process')
-    # Polymorphic id
-    type = db.Column(db.String(50))
-    __mapper_args__ = {
-        'polymorphic_identity': 'processes',
-        'polymorphic_on':type
-    }
-
-    def as_dict(self):
-        return {
-                'submitted' : '{}'.format(self.submitted.timestamp()),
-                'nEvents' : len(self.events),
-                # ... other by descendants
-            }
-
-class ArrayProcess(RemoteProcess):
-    __tablename__ = 'array_jobs'
-    id = db.Column(db.Integer, db.ForeignKey('processes.id'), primary_key=True)
-    array = db.relationship('ProcArray', back_populates='processes')
-    # If process within an array: parent array's id, if any
-    array_id = db.Column(db.Integer, db.ForeignKey('arrays.id'))
-    # If process within an array: job index (number in array)
-    job_num = db.Column(db.Integer)
-
-    __mapper_args__ = {
-        'polymorphic_identity':'array_jobs',
-    }
-
-    def as_dict(self):
-        d = super().as_dict()
-        d.update({
-                'array' : self.array.name,
-                'nJob' : self.job_num
-            })
-        return d
-
-class StandaloneProcess(RemoteProcess):
-    __tablename__ = 'standalone_jobs'
-    id = db.Column(db.Integer, db.ForeignKey('processes.id'), primary_key=True)
-    task = db.relationship('BatchTask', back_populates='jobs')
-    # If process not within an array: owning task ID
-    task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'))
-    # Usually matches the task's submission time
-    submitted = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    # Submission host -- usually matches the task's submission host
-    host = db.Column(db.String)
-    # If process not within an array: process name
-    name = db.Column(db.String)
-    __mapper_args__ = {
-        'polymorphic_identity':'standalone_jobs',
-        #'polymorphic_identity' : ,
-    }
-    __table_args__ = (sqlalchemy.schema.UniqueConstraint( 'task_id', 'name'
-                                                        , name='_task_name_uc'),)
-
-    def as_dict(self):
-        d = super().as_dict()
-        d.update({
-                'task' : self.task.label,
-                'name' : self.name
-            })
-        return d
-
-class RemProcEvent(db.Model):
+class Event(db.Model):
     """
     Reflects the process' event. May be one of the following types:
         - Submitted: corresponds to process being sent to the computational
@@ -197,59 +126,30 @@ class RemProcEvent(db.Model):
     The submitted/started event carries only the timestamp.
     """
     __tablename__ = 'events'
+    # Event ID
     id = db.Column(db.Integer, primary_key=True)
-    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    ev_type = db.Column(db.Enum(lamia.monitoring.schemata.RemProcEventType))  # XXX?
-    payload = db.Column(db.String)
+    # Event sent time (self-signed by event)
+    sentAt = db.Column(db.DateTime)
+    # Event received time
+    receivedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # Event content (if any)
+    payload = db.Column(db.String)  # TODO: db.Column(db.JSON) ?
+    # Event class string
+    eventClass = db.Column(db.String)
+    # If associated process is an array, this column denotes the particular
+    # number of the physical process inside the array
+    procNumInArray = db.Column(db.Integer)
     #
-    process = db.relationship('RemoteProcess', back_populates='events')
-    proc_id = db.Column(db.Integer, db.ForeignKey('processes.id'))
-    type = db.Column(db.String(50))
-    __mapper_args__ = {
-        'polymorphic_identity': 'events',
-        'polymorphic_on':type
-    }
+    process = db.relationship( 'Process'
+                             , back_populates='events')
+    procID = db.Column(db.String)
+    taskID = db.Column(db.String)
+    __table_args__ = (sqlalchemy.schema.ForeignKeyConstraint([procID, taskID],
+                                                             [Process.name, Process.taskID]),
+                      {})
 
-    def as_dict(self):
-        return {
-                'timestamp' : '{}'.format(self.timestamp.timestamp()),
-                'type' : self.ev_type,  # str?
-                'payload' : self.payload,
-                'process' : None,  # TODO
-                # ... other by descendants
-            }
+    #__mapper_args__ = {
+    #    'polymorphic_on': eventClass,
+    #    'polymorphic_identity': 'common'
+    #}
 
-class RemProcBeatProgress(RemProcEvent):
-    """
-    Beating events are frequently sent by client jobs to indicate the
-    current progress. Here we define such a type for easier querying of this
-    information.
-    """
-    __tablename__ = 'progress_beats'
-    # Current progress
-    progress_current = db.Column(db.Integer)
-    # Upper limit of the entries (may be not defined)
-    progress_uplimit = db.Column(db.Integer)
-    __mapper_args__ = { 'polymorphic_identity':'progress_beats' }
-
-    def as_dict(self):
-        d = super().as_dict()
-        d.update({
-                'progress' : (self.progress_current, self.progress_uplimit)
-            })
-        return d
-
-class RemProcTerminated(RemProcEvent):
-    """
-    Termination messages usually carry
-    """
-    __tablename__ = 'termination_events'
-    completion = db.Column(db.Integer)
-    __mapper_args__ = { 'polymorphic_identity':'termination_events' }
-
-    def as_dict(self):
-        d = super().as_dict()
-        d.update({
-                'resultCode' : self.completion
-            })
-        return d

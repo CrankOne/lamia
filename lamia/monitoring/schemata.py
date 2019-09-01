@@ -22,107 +22,119 @@
 Lamia provides rudimentary support for monitoring of the running processes via
 RESTful API. This module declares object relational model for running tasks.
 
-This module declares common schemata for HTTP-based JSON data exchange.
+This module declares schemata for HTTP-based JSON data exchange.
+
+Uses `marshmallow-oneofschema' extension to sustain the sqlalchemy's
+polymorphism model:
+    https://github.com/marshmallow-code/marshmallow-oneofschema
+See relevant discussion on the marsmallow's dev forum:
+    https://github.com/marshmallow-code/apispec/pull/182
 """
-import schema, datetime, calendar, enum, itertools, re
-from email.utils import parsedate_tz as parsedate_  # the RFC 5322 is standard here
 
-rxNsTimestamp = re.compile(r'\d+\.\d+')
+# extremely useful:
+#   https://marshmallow-sqlalchemy.readthedocs.io/en/latest/recipes.html
 
-def parsedate(dt):
-    if rxNsTimestamp.match(dt):
-        # this is probably timestamp with nanoseconds ($ date +%s.%N)
-        return datetime.datetime.fromtimestamp(float(dt))
-    else:
-        # otherwise, assume the string being in RFC 5322 format
-        return datetime.datetime.fromtimestamp(calendar.timegm(parsedate_(dt)))
+import logging, json
 
-_EV_TYPES = {
-    1: ['submitted',    'SUBM'],
-    2: ['started',      'STRT'],
-    3: ['beat',         'BEAT'],
-    4: ['terminated',   'TERM'],
-}
+import marshmallow
+import marshmallow.fields
+from marshmallow_oneofschema import OneOfSchema
+from collections.abc import Iterable
 
-RemProcEventType = enum.Enum(
-    value='RemProcEventType',
-    names=itertools.chain.from_iterable(
-        itertools.product(v, [k]) for k, v in _EV_TYPES.items()
-    )
-)
+from lamia.monitoring.app import ma, db
+from lamia.monitoring.orm import Task, Process, Array, Event
+import lamia.monitoring.app
 
-def event_type_from_str(s):
-    return dict( (v[0], RemProcEventType[v[1]]) for k, v in _EV_TYPES.items() )[s]
+class BaseSchema(ma.ModelSchema):
+    class Meta:
+        sqla_session = db.session
 
-gMetaSignature = schema.Schema({
-        'time' : schema.Use(parsedate),
-        'host' : str
-    })
+class ProcessSchema(BaseSchema):
+    class Meta(BaseSchema.Meta):
+        model = Process
 
-updateEventSchema = schema.Schema({
-    '!meta' : gMetaSignature,
-    'type' : schema.And( str
-                       , lambda s : s.lower() in set([v[0] for v in _EV_TYPES.values()])
-                       , schema.Use( event_type_from_str ) ),
-    schema.Optional('exitCode') : schema.Use(int),
-    schema.Optional('payload') : lambda o: type(o) is dict  # arbitrary dict
-})
+class ArraySchema(BaseSchema):
+    class Meta(BaseSchema.Meta):
+        model = Array
+        #exclude=('id',)
 
-# Schema of incoming `event' message.  XXX?
-eventSchema = {
-    'POST' : schema.Schema({
-        '!meta' : gMetaSignature,
-        'from' : schema.Or( schema.And(str, len)
-                          , [str, str, schema.Use(int)] ),
-        'type' : schema.And( str
-                           , lambda s : s.lower() in set(v[0] for v in _EV_TYPES.values())
-                           , schema.Use( event_type_from_str ) ),
-        schema.Optional('exitCode') : schema.Use(int),
-        schema.Optional('payload') : lambda o: type(o) is dict  # arbitrary dict
-    }),
-    # ...
-}
+class PolymorphicProcessSchema(OneOfSchema):
+    type_schemas = { "solitary" : ProcessSchema
+                   , "array" : ArraySchema }
+    def get_obj_type( self, obj ):
+        if isinstance( obj, Array ):
+            return "array"
+        elif isinstance( obj, Process ):
+            return "solitary"
+        else:
+            assert(False)
 
-# Schemata of single/array jobs (remote processes) requests
-procSchema = {
-    'POST' : schema.Schema({
-        '!meta' : gMetaSignature,
-    }),
-    'PUT' : updateEventSchema
-}
+class TaskSchema(BaseSchema):
+    processes = marshmallow.fields.Nested( PolymorphicProcessSchema, many=True )
 
-# Schemata of single/array jobs (remote processes) requests
-arraySchema = {
-    'POST' : schema.Schema({
-        '!meta' : gMetaSignature,
-        'nJobs' : schema.And( schema.Use(int), lambda s: int(s) > 0 ),
-        'tolerance' : schema.And( schema.Use(int), lambda s: int(s) > 0 ),
-    }),
-}
+    class Meta(BaseSchema.Meta):
+        model = Task
 
-# Schema of incoming `new task' message.
-taskSchema = {
-    'POST' : schema.Schema({
-        '!meta' : gMetaSignature,
-        'typeLabel' : str,
-        'config' : lambda o: type(o) is dict,  # arbitrary dict
-        schema.Optional('depGraph') : str,
-        schema.Optional('jobs') : [ str ],
-        schema.Optional('arrays') : { str : schema.Or( schema.And(int, lambda n: n > 1)
-                                                     , [ schema.And(int, lambda n: n > 1), schema.And(int, lambda n: n > 1) ] ) }
-    }),
-    # ...
-}
+    # Treatment of the `processes' field is somewhat tricky, so we do not
+    # rely on marshmallow on creation/serialization of this field.
+    @marshmallow.pre_load
+    def make_processes(self, data, **kwargs):
+        #print(json.dumps(data, sort_keys=True, indent=2))
+        if type(data['processes']) in (list, tuple):
+            return data
+        if 'processes' not in data:
+            raise marshmallow.ValidationError( 'Input data must have a "data" key.'
+                                             , '_preprocessing' )
+        for k, args in data['processes'].items():
+            isSingleJob = args is None
+            if isSingleJob:
+                data['processes'][k] = {'type' : 'solitary'}
+                continue
+            else:
+                if isinstance(args, Iterable):
+                    data['processes'][k] = {
+                        'type' : 'array',
+                        'nJobs' : args[0],
+                        'fTolerance' : args[1]
+                    }
+                else:
+                    data['processes'][k] = {
+                        'type' : 'array',
+                        'nJobs' : args,
+                    }
+        pl = []
+        for k, v in data['processes'].items():
+            v['name'] = k
+            pl.append(v)
+        data['processes'] = pl
+        return data
 
-# The "term" schema. Could be defined:
-#   - as a scalar value (i.a. string)
-#   - as a range: [<from>, <to>] or ["<=", <val>]
+class EventSchema(BaseSchema):
+    process = marshmallow.fields.Tuple((
+                    marshmallow.fields.String(),
+                    marshmallow.fields.String(),
+                    marshmallow.fields.Integer(allow_none=True)
+                ))
 
-# Schemata of incoming search/lookup requests
-searchSchema = schema.Schema({
-        '!meta' : gMetaSignature,
-        'subject' : schema.And(str, lambda s: s in {'task', 'event', 'array', 'job'}),
-        'terms' : { str : str },
-        'values' : [ str ],
-        schema.Optional('order') : [ str ]
-    })
+    class Meta(BaseSchema.Meta):
+        model = Event
+
+    @marshmallow.pre_load
+    def make_process(self, data, **kwargs):
+        L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
+        if 'process' in data:
+            return data
+        L = logging.getLogger(__name__)
+        if 'taskName' not in data \
+        or 'procName' not in data :
+            L.error( json.dumps(data) )
+            raise marshmallow.ValidationError( 'Event input data must'
+                    ' have "taskName" and "procName" keys.', '_preprocessing' )
+        data['process'] = ( data.pop('taskName'), data.pop('procName'), None )
+        return data
+
+taskSchema = TaskSchema()
+tasksSchema = TaskSchema(many=True)
+eventSchema = EventSchema()
+eventsSchema = EventSchema(many=True)
+

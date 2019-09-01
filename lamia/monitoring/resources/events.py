@@ -26,6 +26,7 @@ Their lyfecycle does not imply direct deletion or update.
 Insertion of event must be performed with PATCH'ing corresponding job instance.
 """
 
+import sqlalchemy
 import flask_restful
 import lamia.monitoring.orm as models
 from lamia.monitoring.resources import validate_input
@@ -34,74 +35,31 @@ import lamia.monitoring.app
 import lamia.monitoring.schemata as schemata
 
 class Events(flask_restful.Resource):
-    method_decorators = [validate_input(schemata.eventSchema)]
-    def _xxx_post(self, vd):
-        """
-        TODO: Delete this!
-        """
-        resp = { 'valid' : False
-               , 'taskID' : None
-               , 'redundant' : False
-               , 'considered' : False }
-        L = logging.getLogger(__name__)
-        S = lamia.monitoring.app.db.session
-        # Look for task label
-        if type( vd['from'] ) is str:
-            task = S.query(models.BatchTask).filter_by(label=vd['from'] ).first()
+    method_decorators = [validate_input({'POST': schemata.eventSchema})]
+    #def get( self, e, _meta=None ):
+    #    raise NotImplementedError()
+
+    def post( self, vd, _meta=None ):
+        resp = {'created' : False}
+        L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
+        taskName, jobName, jobIndex = vd.pop('process')
+        t = S.query(models.Task).filter_by(name=taskName).one_or_none()
+        if not t:
+            resp['errors'] = [{ 'reason' : 'Event corresponds to unknwon task.'
+                              , 'details' : taskName }]
+            return resp, 404
+        if jobIndex is None:
+            j = S.query(models.Process).filter_by(name=jobName, task=t).one_or_none()
         else:
-            task = S.query(models.BatchTask).filter_by(label=vd['from'][0] ).first()
-        if not task:
-            resp['taskID'] = None
-            resp['considered'] = False
-            return resp, 404  # Well, no task found...
-        resp['taskID'] = task.id
-        if type( vd['from'] ) in (list, tuple):
-            # Process within the array
-            arr = S.query(models.ProcArray).filter_by( task_id=task.id
-                                                     , name=vd['from'][1] ).first()
-            if not arr:
-                resp['arrayID'] = None
-                L.error( 'Unable to locate array named "%s" within (existing)'
-                        ' task "%s".', vd['from'][1], vd['from'][0] )
-                return resp, 404
-            resp['arrayID'] = arr.id
-            # Find process entry within the array (create, if it doesn't exist)
-            p = S.query(models.ArrayProcess).filter_by( array_id=arr.id
-                                                       , job_num=vd['from'][2] ).first()
-            if not p:
-                p = models.ArrayProcess( job_num=vd['from'][2] )
-                S.add(p)
-                resp['processCreated'] = True
-                arr.processes.append(p)
-            else:
-                resp['processCreated'] = False
-        else:
-            # Standalone process within the task
-            p = S.query(models.StandaloneProcess).filter_by( task_id=task.id
-                                                           , name=vd['from'] ).first()
-            if not p:
-                p = models.StandaloneProcess(name=vd['from'])
-                task.jobs.append(p)
-                S.add(p)
-                resp['processCreated'] = True
-                arr.processes.append(p)
-            else:
-                resp['processCreated'] = False
-        # Create new event, associate with task and commit to DB
-        eve = models.new_remote_proc_event(vd)
-        p.events.append(eve)
-        S.add(p)
+            j = S.query(models.Process).filter_by(name=jobName, task=t).one_or_none()
+        if j is None:
+            resp['errors'] = [{ 'reason' : 'Event corresponds to unknown process.'
+                              , 'details' : jobName }]
+            return resp, 404
+        event = models.Event( process=j
+                            , **vd )
+        S.add( event )
         S.commit()
-        resp['considered'] = True
-        resp['eventID'] = eve.id
-        #L.debug('Considered event of type ... from host ...')
+        resp['created'] = True
         return resp, 201
-
-    def get( self, taskLabel, eventID
-           , jobName=None, arrayName=None, jobNum=None ):
-        raise NotImplementedError()
-
-    def post( self, taskLabel, eventID
-           , jobName=None, arrayName=None, jobNum=None ):
-        raise NotImplementedError()
 

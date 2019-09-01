@@ -26,33 +26,33 @@ RESTful API. This module declares object relational model for running tasks.
 Code below constructs a primitive server.
 """
 
-import logging, json, schema, flask, flask_sqlalchemy, flask_restful
+import flask \
+     , flask_sqlalchemy \
+     , flask_restful
+
+from flask_marshmallow import Marshmallow
 
 app = flask.Flask(__name__)
 api = flask_restful.Api(app)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/some.sqlite3'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/lamia-restful-test.sqlite3'
 db = flask_sqlalchemy.SQLAlchemy(app)
+
+ma = Marshmallow(app)
+
 import lamia.monitoring.orm as models
 db.create_all()
 
 from lamia.monitoring.resources.events import Events
 from lamia.monitoring.resources.tasks import Tasks
-from lamia.monitoring.resources.arrays import Arrays
-from lamia.monitoring.resources.jobs import Jobs
 
-api.add_resource( Tasks, '/api/v0'
-                       , '/api/v0/<taskLabel>')
+api.add_resource( Tasks
+        , '/api/v0'
+        , '/api/v0/<name>')
 
-api.add_resource(Arrays, '/api/v0/<taskLabel>/arrays'
-                       , '/api/v0/<taskLabel>/arrays/<arrayName>')
-
-api.add_resource(  Jobs, '/api/v0/<taskLabel>/jobs'
-                       , '/api/v0/<taskLabel>/jobs/<jobName>'
-                       , '/api/v0/<taskLabel>/arrays/<arrayName>/<jobNum>' )
-
-api.add_resource(Events, '/api/v0/<taskLabel>/jobs/<jobName>/<eventID>'
-                       , '/api/v0/<taskLabel>/arrays/<arrayName>/<jobNum>/<eventID>' )
+api.add_resource( Events
+        , '/api/v0/<taskName>/<procName>'
+        , '/api/v0/<taskName>/<procName>/<int:procNumInArray>' )
 
 #app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
 #app.add_url_rule('/api/events', view_func=Events.as_view('events'))

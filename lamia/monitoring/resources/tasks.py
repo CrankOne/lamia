@@ -26,6 +26,7 @@ No HATEOAS currently implemented.
 """
 
 import flask_restful
+import sqlalchemy
 import lamia.monitoring.orm as models
 import flask, logging, json, schema
 import lamia.monitoring.app
@@ -33,43 +34,49 @@ from lamia.monitoring.resources import validate_input
 import lamia.monitoring.schemata as schemata
 
 class Tasks(flask_restful.Resource):
-    method_decorators = [validate_input(schemata.taskSchema)]
-    def post(self, vd, taskLabel):
+    method_decorators = [validate_input({'POST' : schemata.taskSchema})]
+    def post( self, t
+            , _meta=None, _schema=None):
+        """
+        Creates new task instance.
+        Example JSON:
+            {
+                "!meta" : { "time": <timestamp>, "host" : <localhost> },
+                "typeLabel" : <task-class-name>,
+                "config" : <arbitrary-config>,
+                "processes" : { <str> : None|<int>|(<int>, <int>) }
+                ["depGraph" : <networkx-bz2-compressed-base64-encoded>, ]
+            }
+        The `typeLabel` reflects the task class defined by user code.
+        Upon successful task creation, returns `201 (CREATED)`. May return
+        `409 (CONFLICT)` if `taskLabel` from query string is not unique.
+        """
         resp = { 'created' : False }
         L = logging.getLogger(__name__)
         S = lamia.monitoring.app.db.session
-        ct = vd['!meta']['time']
+        ct = _meta['time'] if _meta else None
+        t = _schema.load( t, session=S )
         # We require task label to be unique, so look up for existing one first:
-        t = S.query(models.BatchTask).filter_by(label=taskLabel ).first()
-        if t:
-            resp['errors'] = [{ 'reason' : 'Task name is not unique.'
-                              , 'details' : t.as_dict() }]
-            return resp, 409  # conflict
-            # see: https://stackoverflow.com/questions/3825990/http-response-code-for-post-when-resource-already-exists
-        # Create task
-        t = models.BatchTask( label=taskLabel
-                            , submitted=ct
-                            , dep_graph=vd.get('depGraph', None)
-                            , task_type=vd.get('typeLabel', None) )
-        if 'arrays' in vd:
-            # fill task with arays
-            arrs = []
-            for arrNm, arrDscr in vd['arrays'].items():
-                if type(arrDscr) is int:
-                    arrs.append( models.ProcArray( submitted=ct
-                                                 , name=arrNm
-                                                 , nJobs=arrDscr ) )
-                else:
-                    # TODO: check that fTolerance < nJobs
-                    arrs.append( models.ProcArray( submitted=ct
-                                                 , name=arrNm
-                                                 , fTolerance=arrDscr[0]
-                                                 , nJobs=arrDscr[1] ) )
-            t.arrays = arrs
-            S.add_all(arrs)
-        if 'jobs' in vd:
-            t.jobs = [ models.StandaloneProcess(name=j, submitted=ct) for j in vd['jobs'] ]
-            S.add_all(t.jobs)
+        #t = S.query(models.Task).filter_by( name=name ).first()
+        state = sqlalchemy.inspect(t)
+        # XXX
+        #print ('Transient: %s, Pending %s, Detached: %s, Persistent: %s' % (
+        #        state.transient, state.pending, state.detached, state.persistent))
+        with S.no_autoflush:
+            if S.query(models.Task).filter_by( name=t.name ).first() is not None:
+                resp['errors'] = [{ 'reason' : 'Task name is not unique.'
+                                  , 'details' : schemata.taskSchema.dump(t) }]
+                if not state.transient:
+                    resp['errors'].append({'reason' : 'Deserialized task'
+                        ' object is not transient.'})
+                return resp, 409  # conflict
+                # see: https://stackoverflow.com/questions/3825990/http-response-code-for-post-when-resource-already-exists
+        # Check that task has at least one process defined within (empty tasks
+        # are useless).
+        if not t.processes:
+            resp['errors'] = [{ 'reason' : 'Refuse to create task instance in DB.'
+                              , 'details' : ['Task with no "processes".'] }]
+            return resp, 400
         S.add(t)
         S.commit()
         resp['created'] = True
@@ -79,18 +86,11 @@ class Tasks(flask_restful.Resource):
         L = logging.getLogger(__name__)
         S = lamia.monitoring.app.db.session
         if taskLabel:
-            t = S.query(models.BatchTask).filter_by(label=taskLabel).one()
-            return t.as_dict()
+            t = S.query(models.Task).filter_by(label=taskLabel).one()
+            return schemata.taskSchema.dump(t)
         else:
-            ts = S.query(models.BatchTask).all()
-            res = { 'tasks' : [] }
-            for t in ts:
-                res['tasks'].append( t.as_dict() )
-                res['tasks'][-1]['!links'] = {
-                        'href' : flask.url_for('tasks', taskLabel=t.label),
-                        'methods' : ['POST', 'GET', 'DELETE']
-                }
-            return res, 200
+            ts = S.query(models.Task).all()
+            return schemata.tasksSchema.dump(ts)
 
     def delete(self, taskLabel=None):
         """
@@ -105,6 +105,6 @@ class Tasks(flask_restful.Resource):
                             'tasks is allowed only in debug mode.'
                     }, 403
             else:
-                nEntries = S.query(models.BatchTask).delete()
+                nEntries = S.query(models.Task).delete()
                 S.commit()
                 return { 'deleted' : nEntries }, 200
