@@ -44,15 +44,21 @@ import lamia.monitoring.orm as models
 db.create_all()
 
 from lamia.monitoring.resources.events import Events
+from lamia.monitoring.resources.processes import Processes
 from lamia.monitoring.resources.tasks import Tasks
 
 api.add_resource( Tasks
         , '/api/v0'
-        , '/api/v0/<name>')
+        , '/api/v0/<name>' )
+
+api.add_resource( Processes
+        , '/api/v0/<taskName>/<processName>'
+        )
 
 api.add_resource( Events
-        , '/api/v0/<taskName>/<procName>'
-        , '/api/v0/<taskName>/<procName>/<int:procNumInArray>' )
+        , '/api/v0/<taskName>/<procName>/event'
+        #, '/api/v0/<taskName>/<procName>/<int:procNumInArray>'  # xxx, query-encoded
+        )
 
 #app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
 #app.add_url_rule('/api/events', view_func=Events.as_view('events'))

@@ -41,7 +41,7 @@ class Tasks(flask_restful.Resource):
         Creates new task instance.
         Example JSON:
             {
-                "!meta" : { "time": <timestamp>, "host" : <localhost> },
+                "_meta" : { "time": <timestamp>, "host" : <localhost> },
                 "typeLabel" : <task-class-name>,
                 "config" : <arbitrary-config>,
                 "processes" : { <str> : None|<int>|(<int>, <int>) }
@@ -77,34 +77,37 @@ class Tasks(flask_restful.Resource):
             resp['errors'] = [{ 'reason' : 'Refuse to create task instance in DB.'
                               , 'details' : ['Task with no "processes".'] }]
             return resp, 400
+        if _meta:
+            t.submitted = _meta['time']
+            t.hostname = _meta['host']
+        t.submHostIP = flask.request.remote_addr
         S.add(t)
         S.commit()
         resp['created'] = True
         return resp, 201  # created
 
-    def get(self, taskLabel=None):
+    def get(self, name=None):
         L = logging.getLogger(__name__)
         S = lamia.monitoring.app.db.session
-        if taskLabel:
-            t = S.query(models.Task).filter_by(label=taskLabel).one()
+        if name:
+            t = S.query(models.Task).filter_by(name=name).one()
             return schemata.taskSchema.dump(t)
         else:
             ts = S.query(models.Task).all()
             return schemata.tasksSchema.dump(ts)
 
-    def delete(self, taskLabel=None):
+    def delete(self, name=None):
         """
         Perform deletion of particular task or all the task indexed in table.
         """
         L = logging.getLogger(__name__)
         S = lamia.monitoring.app.db.session
-        if taskLabel is None:
-            if not lamia.monitoring.app.app.debug:
-                return {
-                        'error' : 'By security reasons, batch deletion of all '
-                            'tasks is allowed only in debug mode.'
+        if name is None:
+            return { 'error' : 'By security reasons, batch deletion of task '
+                               'is forbidden.'
                     }, 403
-            else:
-                nEntries = S.query(models.Task).delete()
-                S.commit()
-                return { 'deleted' : nEntries }, 200
+        else:
+            t = S.query(models.Task).filter_by(name=name).one()
+            S.delete(t)
+            S.commit()
+            return { 'deleted' : 1 }, 200

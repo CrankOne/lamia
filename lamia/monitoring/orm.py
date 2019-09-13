@@ -28,12 +28,14 @@ For multiple unique constrain, see:
     https://stackoverflow.com/questions/10059345/sqlalchemy-unique-across-multiple-columns
 """
 
-import datetime, enum, itertools, json, enum
+import datetime, enum, itertools, json, enum, logging
 import base64, bz2, pickle  # for dependency graph
 
 from lamia.monitoring.app import db
 
 import sqlalchemy.schema
+from sqlalchemy import func, select, and_ #, where
+import sqlalchemy.ext.hybrid
 from sqlalchemy.ext.declarative import DeclarativeMeta
 
 class Task(db.Model):
@@ -49,18 +51,19 @@ class Task(db.Model):
     taskClass = db.Column(db.String)
     # Task submission time and date
     submittedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    # Task completion time and data
-    completedAt = db.Column(db.DateTime)
+    # Submission host IP
+    submHostIP = db.Column(db.String)
+    # Task submission host IP address
+    hostname = db.Column(db.String)
     # bz2 compressed, base64-encoded representation of networkx DiGraph
     depGraph = db.Column(db.String)
     # Task config
     config = db.Column(db.String)  # TODO: db.Column(db.JSON) ?
-    # List of arrays associated with the task, if any
-    #arrays = db.relationship('ProcArray', back_populates='task', cascade='all, delete-orphan')
     # List of individual jobs associated with the task, if any (not included
     # into arrays list)
     processes = db.relationship( "Process"
-                                , back_populates='task')
+                                , back_populates='task'
+                                , cascade="save-update, merge, delete, delete-orphan" )
 
     def get_graph(self):
         """
@@ -81,19 +84,29 @@ class Process(db.Model):
     # If process not within an array: owning task ID
     taskID = db.Column(db.String, db.ForeignKey('tasks.name'), primary_key=True)
     task = db.relationship('Task', back_populates='processes')
-    # Usually matches the task's submission time
-    submittedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     # Events log, associated to process
     events = db.relationship( 'Event'
-                            , back_populates='process')
+                            , back_populates='process'
+                            , cascade="save-update, merge, delete, delete-orphan"
+                            )
     # Polymorphic id
     kin = db.Column(db.Integer)
     __mapper_args__ = {
         'polymorphic_on': kin,
-        'polymorphic_identity': kStandaloneProcess
+        'polymorphic_identity': kStandaloneProcess,
+        #'concrete' : True
     }
-    #__table_args__ = (sqlalchemy.schema.UniqueConstraint( 'taskID', 'name'
-    #                                                    , name='_task_name_uc'),)
+
+    @sqlalchemy.ext.hybrid.hybrid_property
+    def lastEventClass(self):
+        """
+        A computed property reflecting current job status: returns last class.
+        """
+        L, S = logging.getLogger(__name__), db.session
+        lec = S.query(Event.eventClass).filter( and_( Event.taskID == self.taskID
+                                          , Event.procID == self.name ) ) \
+                .order_by(Event.recievedAt.desc()).first()
+        return lec[0] if lec else None
 
 class Array(Process):
     """
@@ -109,10 +122,26 @@ class Array(Process):
     nJobs = db.Column(db.Integer, nullable=False)
     # Might not be set, indicating no failure tolerance here
     fTolerance = db.Column(db.Integer, nullable=True)
-    __mapper_args__ = { 'polymorphic_identity': kArrayProcess }
+    __mapper_args__ = { 'polymorphic_identity': kArrayProcess
+                      #, 'concrete' : True
+                      }
     __table_args__ = (sqlalchemy.schema.ForeignKeyConstraint([name, taskID],
                                                              [Process.name, Process.taskID]),
                       {})
+
+    #@sqlalchemy.ext.hybrid.hybrid_method
+    #def events_of_job(self, jobNum):
+    #    return self.events.filter_by( eventClass=evCls ).count()
+    #    #return len([ e for e in self.events
+    #    #    if evCls == e.eventClass ])
+
+    #@events_num_of_class.expression
+    #def events_of_job(cls, jobNum):
+    #    return (select([sqlalchemy.func.count(Event.child_id)]).
+    #            where(Event.procID == cls.name).
+    #            where(Event.taskID == cls.taskID).
+    #            label("events_of_class")
+    #            )
 
 class Event(db.Model):
     """
@@ -130,26 +159,25 @@ class Event(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     # Event sent time (self-signed by event)
     sentAt = db.Column(db.DateTime)
-    # Event received time
-    receivedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # Event recieved time
+    recievedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     # Event content (if any)
     payload = db.Column(db.String)  # TODO: db.Column(db.JSON) ?
     # Event class string
     eventClass = db.Column(db.String)
+    # Host self-identification (hostname, no reverse DNS lookup)
+    hostname = db.Column(db.String)
+    # Request-signed IP
+    clientIP = db.Column(db.String)
     # If associated process is an array, this column denotes the particular
     # number of the physical process inside the array
     procNumInArray = db.Column(db.Integer)
     #
     process = db.relationship( 'Process'
-                             , back_populates='events')
+                             , back_populates='events' )
     procID = db.Column(db.String)
     taskID = db.Column(db.String)
     __table_args__ = (sqlalchemy.schema.ForeignKeyConstraint([procID, taskID],
                                                              [Process.name, Process.taskID]),
                       {})
-
-    #__mapper_args__ = {
-    #    'polymorphic_on': eventClass,
-    #    'polymorphic_identity': 'common'
-    #}
 

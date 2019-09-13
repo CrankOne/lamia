@@ -26,6 +26,7 @@ Helper classes and utility functions are to be defined here.
 import flask, schema, logging, inspect
 import sqlalchemy.orm.exc
 import lamia.monitoring.app
+import lamia.monitoring.schemata
 
 def validate_input( inputSchema ):
     """
@@ -71,8 +72,9 @@ def validate_input( inputSchema ):
                         vd[k] = kwargs.pop(k)
                 argsNamesSet = set( p[0] for p in argNames )
                 if '_meta' in argsNamesSet:
-                    # TODO: valudate meta info vs. schema:
-                    kwargs['_meta'] = vd.pop('_meta', None)
+                    data = vd.pop('_meta', None)
+                    if data:
+                        kwargs['_meta'] = lamia.monitoring.schemata.metaSchema.load( data )
                 if '_data' in argsNamesSet:
                     kwargs['_data'] = vd
                 if '_schema' in argsNamesSet:
