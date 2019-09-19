@@ -35,8 +35,16 @@ from lamia.monitoring.app import db
 
 import sqlalchemy.schema
 from sqlalchemy import func, select, and_ #, where
+from sqlalchemy.ext.associationproxy import association_proxy
 import sqlalchemy.ext.hybrid
 from sqlalchemy.ext.declarative import DeclarativeMeta
+
+# Table maintainging task-to-tags relationship (many to many).
+# TODO: auto-delete tag(s) being no more associated with any task.
+tagsAssocTable = db.Table( 'tag_associations'
+                         , db.Column('task_name', db.String, db.ForeignKey('tasks.name'))
+                         , db.Column('tag_name', db.String, db.ForeignKey('tags.name'))
+                         )
 
 class Task(db.Model):
     """
@@ -46,9 +54,6 @@ class Task(db.Model):
     __tablename__ = 'tasks'
     # Unique label of the particular task
     name = db.Column(db.String, primary_key=True)
-    #id = db.Column(db.Integer, primary_key=True)
-    # Task type tag, optional
-    taskClass = db.Column(db.String)
     # Task submission time and date
     submittedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     # Submission host IP
@@ -64,12 +69,22 @@ class Task(db.Model):
     processes = db.relationship( "Process"
                                 , back_populates='task'
                                 , cascade="save-update, merge, delete, delete-orphan" )
+    # List of tags associated with task
+    tags = db.relationship( 'Tag'
+                          , secondary=tagsAssocTable, backref='tasks' )
 
     def get_graph(self):
         """
         Returns an instance of networkx' DiGraph or None.
         """
         pickle.loads(bz2.decompress(base64.b64decode(self.dep_graph))) if self.dep_graph else None
+
+class Tag(db.Model):
+    """
+    Classifiers to sort out the tasks.
+    """
+    __tablename__ = 'tags'
+    name = db.Column(db.String, primary_key=True)
 
 kStandaloneProcess = 0x1
 kArrayProcess = 0x3

@@ -20,8 +20,8 @@ curl --header 'Content-Type: application/json' \
 	        "time" : $(date -u +%s.%N)
 	    },
 	    "depGraph" : "",
+        "tags" : ["testing", "one", "two"],
 	    "config" : "some cfg here",
-	    "taskClass" : "testing",
 	    "processes" : {
 	        "tstArray1" : 10,
 	        "tstArray2" : [10, 8],
@@ -33,6 +33,16 @@ curl --header 'Content-Type: application/json' \
 echo "RETRIEVING A TASK INFO"
 curl --header 'Content-Type: application/json' \
   --request GET "$BASE_URL" \
+  -w '%{http_code}\n'
+
+echo "RETRIEVING A TASK INFO BY NON-EXISTING TAG (NONE)"
+curl --header 'Content-Type: application/json' \
+  --request GET "$HOST/api/v0?tag=three" \
+  -w '%{http_code}\n'
+
+echo "RETRIEVING A TASK INFO BY TAG (ONE)"
+curl --header 'Content-Type: application/json' \
+  --request GET "$HOST/api/v0?tag=testing&tag=two" \
   -w '%{http_code}\n'
 
 echo "RETRIEVING AN ARRAY JOB INFO"
@@ -111,8 +121,8 @@ curl --header 'Content-Type: application/json' \
   --request GET "$BASE_URL/tstArray2/event?arrayIndex=3" \
   -w '%{http_code}\n'
 
-echo "DELETING A TASK"
-curl --header 'Content-Type: application/json' \
-     --request DELETE "$BASE_URL" \
-     -w '%{http_code}\n'
-
+#echo "DELETING A TASK"
+#curl --header 'Content-Type: application/json' \
+#     --request DELETE "$BASE_URL" \
+#     -w '%{http_code}\n'
+#

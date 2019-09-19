@@ -30,7 +30,7 @@ import sqlalchemy
 import flask_restful
 import lamia.monitoring.orm as models
 from lamia.monitoring.resources import validate_input
-import flask, logging, json, schema
+import flask, logging, json
 import lamia.monitoring.app
 import lamia.monitoring.schemata as schemata
 

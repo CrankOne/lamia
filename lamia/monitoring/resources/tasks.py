@@ -28,7 +28,7 @@ No HATEOAS currently implemented.
 import flask_restful
 import sqlalchemy
 import lamia.monitoring.orm as models
-import flask, logging, json, schema
+import flask, logging, json
 import lamia.monitoring.app
 from lamia.monitoring.resources import validate_input
 import lamia.monitoring.schemata as schemata
@@ -92,9 +92,14 @@ class Tasks(flask_restful.Resource):
         if name:
             t = S.query(models.Task).filter_by(name=name).one()
             return schemata.taskSchema.dump(t)
-        else:
-            ts = S.query(models.Task).all()
-            return schemata.tasksSchema.dump(ts)
+        q = S.query(models.Task)
+        # Otherwise, perform more complex query, if needed
+        filterByTags=flask.request.args.getlist('tag')
+        if filterByTags:
+            q = q.filter(models.Task.tags.any(models.Tag.name.in_(filterByTags)))
+        # TODO: submission/finished/whatever dates
+        ts = q.all()
+        return schemata.tasksSchema.dump(ts)
 
     def delete(self, name=None):
         """

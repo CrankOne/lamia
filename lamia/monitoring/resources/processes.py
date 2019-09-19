@@ -61,9 +61,9 @@ class Processes(flask_restful.Resource):
         #
         if '@all' != processName:
             j = S.query(Ps).filter_by( taskID=taskName, name=processName ).one()
-            print('xxx', j.lastEventClass)
+            print('xxx', j.lastEventClass)  # XXX
             return schemata.polyProcessSchema.dump(j), 200
-        # Build up query
+        # Build up a query
         q = S.query(Ps)
         if hasEventsOfClass:
              q = q.join(models.Event, models.Process.events).filter(

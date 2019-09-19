@@ -9,5 +9,8 @@ networkx
 flask
 flask_sqlalchemy
 flask_restful
+flask_cors
+flask_marshmallow
 marshmallow
+marshmallow_sqlalchemy
 marshmallow-oneofschema

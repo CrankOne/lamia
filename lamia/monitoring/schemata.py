@@ -173,6 +173,7 @@ class EventSchema(BaseSchema):
 
 metaSchema = MetaSchema()
 taskSchema = TaskSchema()
+tasksSchema = TaskSchema(many=True)
 polyProcessSchema = PolymorphicProcessSchema()
 arraySchema = ArraySchema()
 eventSchema = EventSchema()

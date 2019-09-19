@@ -7,7 +7,7 @@ from lamia.core.templates import Loader, Templates
 import lamia.core.configuration as LC
 import lamia.core.interpolation as LI
 
-TMPLTS_DIR='tests'
+TMPLTS_DIR='./tests'
 
 class TemplatesTest(UT.TestCase):
     """

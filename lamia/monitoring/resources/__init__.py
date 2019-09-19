@@ -23,7 +23,7 @@
 Helper classes and utility functions are to be defined here.
 """
 
-import flask, schema, logging, inspect
+import flask, logging, inspect
 import sqlalchemy.orm.exc
 import lamia.monitoring.app
 import lamia.monitoring.schemata

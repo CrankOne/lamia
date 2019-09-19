@@ -28,42 +28,50 @@ Code below constructs a primitive server.
 
 import flask \
      , flask_sqlalchemy \
-     , flask_restful
+     , flask_restful \
+     , flask_cors
 
 from flask_marshmallow import Marshmallow
 
-app = flask.Flask(__name__)
-api = flask_restful.Api(app)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/lamia-restful-test.sqlite3'
-db = flask_sqlalchemy.SQLAlchemy(app)
+def create_app():
+    app = flask.Flask(__name__)
+    # Add
+    #   "Access-Control-Allow-Origin" : "*", 
+    #   "Access-Control-Allow-Credentials" : true 
+    # to request headers for cross-domain requests
+    # see:
+    #   https://stackoverflow.com/a/43547095
+    #   https://stackoverflow.com/a/27423922
+    #cors = flask_cors.CORS(app, allow_headers=['credentials'])
+    cors = flask_cors.CORS(app, resources={r"/api/*": {"origins": "*"}}
+                              #, supports_credentials=True
+                              )
+    api = flask_restful.Api(app)
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/lamia-restful-test.sqlite3'
+    db = flask_sqlalchemy.SQLAlchemy(app)
+    ma = Marshmallow(app)
+    import lamia.monitoring.orm as models
+    db.create_all()
+    from lamia.monitoring.resources.events import Events
+    from lamia.monitoring.resources.processes import Processes
+    from lamia.monitoring.resources.tasks import Tasks
+    api.add_resource( Tasks
+            , '/api/v0'
+            , '/api/v0/<name>' )
 
-ma = Marshmallow(app)
+    api.add_resource( Processes
+            , '/api/v0/<taskName>/<processName>'
+            )
 
-import lamia.monitoring.orm as models
-db.create_all()
-
-from lamia.monitoring.resources.events import Events
-from lamia.monitoring.resources.processes import Processes
-from lamia.monitoring.resources.tasks import Tasks
-
-api.add_resource( Tasks
-        , '/api/v0'
-        , '/api/v0/<name>' )
-
-api.add_resource( Processes
-        , '/api/v0/<taskName>/<processName>'
-        )
-
-api.add_resource( Events
-        , '/api/v0/<taskName>/<procName>/event'
-        #, '/api/v0/<taskName>/<procName>/<int:procNumInArray>'  # xxx, query-encoded
-        )
-
-#app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
-#app.add_url_rule('/api/events', view_func=Events.as_view('events'))
-
-@app.route('/')
-def root_view():
-    return 'Here be dragons.'
+    api.add_resource( Events
+            , '/api/v0/<taskName>/<procName>/event'
+            #, '/api/v0/<taskName>/<procName>/<int:procNumInArray>'  # xxx, query-encoded
+            )
+    #app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
+    #app.add_url_rule('/api/events', view_func=Events.as_view('events'))
+    @app.route('/')
+    def root_view():
+        return 'Here be dragons.'
+    return app
 
