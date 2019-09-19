@@ -32,6 +32,7 @@ import flask, logging, json
 import lamia.monitoring.app
 from lamia.monitoring.resources import validate_input
 import lamia.monitoring.schemata as schemata
+from lamia.monitoring.orm import db
 
 class Tasks(flask_restful.Resource):
     method_decorators = [validate_input({'POST' : schemata.taskSchema})]
@@ -52,8 +53,7 @@ class Tasks(flask_restful.Resource):
         `409 (CONFLICT)` if `taskLabel` from query string is not unique.
         """
         resp = { 'created' : False }
-        L = logging.getLogger(__name__)
-        S = lamia.monitoring.app.db.session
+        L, S = logging.getLogger(__name__), db.session
         ct = _meta['time'] if _meta else None
         t = _schema.load( t, session=S )
         # We require task label to be unique, so look up for existing one first:
@@ -87,8 +87,7 @@ class Tasks(flask_restful.Resource):
         return resp, 201  # created
 
     def get(self, name=None):
-        L = logging.getLogger(__name__)
-        S = lamia.monitoring.app.db.session
+        L, S = logging.getLogger(__name__), db.session
         if name:
             t = S.query(models.Task).filter_by(name=name).one()
             return schemata.taskSchema.dump(t)
@@ -105,8 +104,7 @@ class Tasks(flask_restful.Resource):
         """
         Perform deletion of particular task or all the task indexed in table.
         """
-        L = logging.getLogger(__name__)
-        S = lamia.monitoring.app.db.session
+        L, S = logging.getLogger(__name__), db.session
         if name is None:
             return { 'error' : 'By security reasons, batch deletion of task '
                                'is forbidden.'

@@ -22,56 +22,70 @@
 """
 Lamia provides rudimentary support for monitoring of the running processes via
 RESTful API. This module declares object relational model for running tasks.
-
-Code below constructs a primitive server.
 """
 
-import flask \
-     , flask_sqlalchemy \
-     , flask_restful \
-     , flask_cors
+import os, yaml, logging.config
+import flask, flask_restful, flask_cors
 
-from flask_marshmallow import Marshmallow
-
+gCfgFile = 'assets/configs/rest-srv.yaml'
 
 def create_app():
+    """
+    Flask application factory function. See:
+        https://flask.palletsprojects.com/en/1.1.x/patterns/appfactories/
+    """
+    # Load config
+    cfgMode = os.environ.get('FLASK_ENV', 'PRODUCTION')
+    with open(gCfgFile) as f:
+        cfg_ = yaml.load(f)
+    cfg = cfg_[cfgMode]
+    # Configure logging
+    logging.config.dictConfig( cfg['logging'] )
+    # Instantiate application
     app = flask.Flask(__name__)
-    # Add
-    #   "Access-Control-Allow-Origin" : "*", 
-    #   "Access-Control-Allow-Credentials" : true 
-    # to request headers for cross-domain requests
-    # see:
-    #   https://stackoverflow.com/a/43547095
-    #   https://stackoverflow.com/a/27423922
-    #cors = flask_cors.CORS(app, allow_headers=['credentials'])
-    cors = flask_cors.CORS(app, resources={r"/api/*": {"origins": "*"}}
-                              #, supports_credentials=True
-                              )
+    # Enable COR
+    if cfg.get('enableCOR', False):
+        # Add
+        #   "Access-Control-Allow-Origin" : "*", 
+        #   "Access-Control-Allow-Credentials" : true 
+        # to request headers for cross-domain requests
+        # see:
+        #   https://stackoverflow.com/a/43547095
+        #   https://stackoverflow.com/a/27423922
+        #cors = flask_cors.CORS(app, allow_headers=['credentials'])
+        cors = flask_cors.CORS(app, resources={r"/api/*": {"origins": "*"}}
+                                  #, supports_credentials=True
+                                  )
     api = flask_restful.Api(app)
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/lamia-restful-test.sqlite3'
-    db = flask_sqlalchemy.SQLAlchemy(app)
-    ma = Marshmallow(app)
+    #app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/lamia-restful-test.sqlite3'
+    # Configure application
+    for k in cfg.keys():
+        if k.isupper():
+            app.config[k] = cfg[k]
     import lamia.monitoring.orm as models
-    db.create_all()
-    from lamia.monitoring.resources.events import Events
-    from lamia.monitoring.resources.processes import Processes
-    from lamia.monitoring.resources.tasks import Tasks
-    api.add_resource( Tasks
-            , '/api/v0'
-            , '/api/v0/<name>' )
+    models.db.init_app(app)
 
-    api.add_resource( Processes
-            , '/api/v0/<taskName>/<processName>'
-            )
+    with app.app_context():
+        models.db.create_all()
+        from lamia.monitoring.resources.events import Events
+        from lamia.monitoring.resources.processes import Processes
+        from lamia.monitoring.resources.tasks import Tasks
+        api.add_resource( Tasks
+                , '/api/v0'
+                , '/api/v0/<name>' )
 
-    api.add_resource( Events
-            , '/api/v0/<taskName>/<procName>/event'
-            #, '/api/v0/<taskName>/<procName>/<int:procNumInArray>'  # xxx, query-encoded
-            )
-    #app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
-    #app.add_url_rule('/api/events', view_func=Events.as_view('events'))
-    @app.route('/')
-    def root_view():
-        return 'Here be dragons.'
-    return app
+        api.add_resource( Processes
+                , '/api/v0/<taskName>/<processName>'
+                )
+
+        api.add_resource( Events
+                , '/api/v0/<taskName>/<procName>/event'
+                #, '/api/v0/<taskName>/<procName>/<int:procNumInArray>'  # xxx, query-encoded
+                )
+        #app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
+        #app.add_url_rule('/api/events', view_func=Events.as_view('events'))
+        @app.route('/')
+        def root_view():
+            return 'Here be dragons.'
+        return app
 

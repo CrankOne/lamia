@@ -25,8 +25,8 @@ Helper classes and utility functions are to be defined here.
 
 import flask, logging, inspect
 import sqlalchemy.orm.exc
-import lamia.monitoring.app
 import lamia.monitoring.schemata
+import marshmallow
 
 def validate_input( inputSchema ):
     """
@@ -88,7 +88,7 @@ def validate_input( inputSchema ):
                                         ]
                            }, 400
                 return f( vd, *args, **kwargs )
-            except schema.SchemaError as e:
+            except marshmallow.ValidationError as e:
                 L.exception(e)
                 return { 'errors' : [ { 'reason' : 'Input data validation failure.'
                                       , 'details' : str(e) }

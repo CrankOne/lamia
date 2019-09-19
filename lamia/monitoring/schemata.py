@@ -42,9 +42,14 @@ import flask_marshmallow.sqla
 from marshmallow_oneofschema import OneOfSchema
 from collections.abc import Iterable
 
-from lamia.monitoring.app import ma, db
+from flask import current_app as app
+from flask_marshmallow import Marshmallow
+
+from lamia.monitoring.orm import db
 from lamia.monitoring.orm import Task, Process, Array, Event
 import lamia.monitoring.app
+
+ma = Marshmallow(app)
 
 class BaseSchema(ma.ModelSchema):
     class Meta:
@@ -159,7 +164,7 @@ class EventSchema(BaseSchema):
 
     @marshmallow.pre_load
     def make_process(self, data, **kwargs):
-        L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
+        L, S = logging.getLogger(__name__), db.session
         if 'processRef' in data:
             return data
         L = logging.getLogger(__name__)

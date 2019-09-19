@@ -31,13 +31,16 @@ For multiple unique constrain, see:
 import datetime, enum, itertools, json, enum, logging
 import base64, bz2, pickle  # for dependency graph
 
-from lamia.monitoring.app import db
+from flask import current_app as app
 
 import sqlalchemy.schema
+import flask_sqlalchemy
 from sqlalchemy import func, select, and_ #, where
 from sqlalchemy.ext.associationproxy import association_proxy
 import sqlalchemy.ext.hybrid
 from sqlalchemy.ext.declarative import DeclarativeMeta
+
+db = flask_sqlalchemy.SQLAlchemy()
 
 # Table maintainging task-to-tags relationship (many to many).
 # TODO: auto-delete tag(s) being no more associated with any task.

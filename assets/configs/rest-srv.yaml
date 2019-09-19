@@ -1,0 +1,97 @@
+---
+# Base logging file handler
+_defaultFileHandler: &dftFileHandler
+    class: logging.handlers.RotatingFileHandler
+    formatter: simple
+    maxBytes: 10485760 # 10MB
+    backupCount: 20
+    encoding: utf8
+# Common runtime configuration for monitoring app
+_common: &common
+    SECRET_KEY: insecure
+    enableCOR: True
+    logging: &commonLogging
+        version: 1
+        formatters:
+            simple:
+                format: "%(asctime)s,%(name)s::%(levelname)s: %(message)s"
+            condensed:
+                format: "\e[1m%(levelname)15s\e[0m: %(message)s"
+        handlers:
+            console:
+                class: logging.StreamHandler
+                level: INFO
+                formatter: condensed
+                stream: ext://sys.stdout
+
+            info_file_handler:
+                <<: *dftFileHandler
+                level: INFO
+                filename: /tmp/lamia.inf.log
+
+            error_file_handler:
+                <<: *dftFileHandler
+                level: ERROR
+                filename: /tmp/lamia.err.log
+
+            debug_file_handler:
+                <<: *dftFileHandler
+                level: DEBUG
+                filename: /tmp/lamia.dbg.log
+
+        loggers:
+            __main__:
+                level: INFO
+                handlers: [console, info_file_handler, error_file_handler, debug_file_handler]
+                propagate: yes
+            lamia:
+                level: INFO
+                handlers: [console, info_file_handler, error_file_handler, debug_file_handler]
+                propagate: yes
+        root:
+            level: INFO
+            handlers: [console, info_file_handler, error_file_handler, debug_file_handler]
+
+DEVELOPMENT: &development
+    <<: *common
+    DEBUG: True
+    SQLALCHEMY_DATABASE_URI: sqlite:////tmp/lamia-restful-test.sqlite3
+
+TESTING: &testing
+    <<: *common
+    SECRET_KEY: sortasecure
+
+PRODUCTION: &production
+    <<: *testing
+    SECRET_KEY: shouldbereallysecureatsomepoint
+    SQLALCHEMY_TRACK_MODIFICATIONS: False
+    enableCOR: True
+    logging:
+        version: 1
+        formatters:
+            simple:
+                format: "%(asctime)s,%(name)s::%(levelname)s: %(message)s"
+        handlers:
+            info_file_handler:
+                <<: *dftFileHandler
+                level: INFO
+                filename: /var/log/lamia/info.log
+
+            error_file_handler:
+                <<: *dftFileHandler
+                level: ERROR
+                filename: /var/log/lamia/errors.log
+
+        loggers:
+            __main__:
+                level: INFO
+                handlers: [info_file_handler, error_file_handler]
+                propagate: yes
+            lamia:
+                level: INFO
+                handlers: [info_file_handler, error_file_handler]
+                propagate: yes
+        root:
+            level: INFO
+            handlers: [info_file_handler, error_file_handler]
+...

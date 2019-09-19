@@ -30,6 +30,7 @@ import sqlalchemy
 import flask_restful
 import lamia.monitoring.orm as models
 from lamia.monitoring.resources import validate_input
+from lamia.monitoring.orm import db
 import flask, logging, json
 import lamia.monitoring.app
 import lamia.monitoring.schemata as schemata
@@ -41,7 +42,7 @@ class Events(flask_restful.Resource):
         """
         Returns events list for certain process.
         """
-        L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
+        L, S = logging.getLogger(__name__), db.session
         arrayIndex = flask.request.args.get('arrayIndex', None)
         # ... optional querying
         if arrayIndex is not None:
@@ -60,7 +61,7 @@ class Events(flask_restful.Resource):
         Creates new event for certain process.
         """
         resp = {'created' : False}
-        L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
+        L, S = logging.getLogger(__name__), db.session
         taskName, procName = vd.pop('processRef')
         arrayIndex = flask.request.args.get('arrayIndex', None)
         if arrayIndex is None:

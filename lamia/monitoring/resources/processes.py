@@ -31,6 +31,7 @@ import flask_restful
 import flask
 
 from sqlalchemy.orm import with_polymorphic
+from lamia.monitoring.orm import db
 
 import lamia.monitoring.app
 import lamia.monitoring.orm as models
@@ -53,7 +54,7 @@ class Processes(flask_restful.Resource):
             filters processes by presense of certain event (STARTED or FINISHED
             may be useful).
         """
-        L, S = logging.getLogger(__name__), lamia.monitoring.app.db.session
+        L, S = logging.getLogger(__name__), db.session
         Ps = with_polymorphic( models.Process, [models.Array,] )
         #
         isArray = flask.request.args.get('isArray', False)
