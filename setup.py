@@ -43,11 +43,27 @@ d = {
         'url' : 'https://github.com/CrankOne/lamia',
         'install_requires' : get_requirements( 'requirements.txt' ),
         'packages' : setuptools.find_packages(exclude=('tests',)),
-        'test_suite' : 'setup.lamia_test_suite'
-        #scripts=[
-        #         'scripts/cool',
-        #         'scripts/skype',
-        #        ]
+        'test_suite' : 'setup.lamia_test_suite',
+        'data_files' : [
+                ('share/lamia' , [ 'assets/configs/lamia.yaml'
+                                 , 'assets/configs/logging.yaml'
+                                 , 'assets/configs/rest-srv.yaml'
+                                 , 'assets/configs/service' ] )
+            ],
+        'classifiers' : [
+            'Development Status :: 3 - Alpha',
+            'Environment :: Console',
+            'Environment :: Web Environment',
+            'Intended Audience :: Developers',
+            'Intended Audience :: System Administrators',
+            'Intended Audience :: Science/Research',
+            'License :: OSI Approved :: MIT License',
+            'Operating System :: POSIX',
+            'Programming Language :: Python',
+            'Topic :: System :: Clustering',
+            'Topic :: Office/Business',
+            'Topic :: Software Development :: Pre-processors',
+        ]
     }
 
 setuptools.setup( **d )

@@ -9,7 +9,7 @@ _defaultFileHandler: &dftFileHandler
 # Common runtime configuration for monitoring app
 _common: &common
     SECRET_KEY: insecure
-    enableCOR: True
+    enableCOR: True  # whether to support cross-domain requests
     logging: &commonLogging
         version: 1
         formatters:
@@ -60,6 +60,9 @@ DEVELOPMENT: &development
 TESTING: &testing
     <<: *common
     SECRET_KEY: sortasecure
+    backend: waitress  # backend in use
+    host: '0.0.0.0'
+    port: 8088
 
 PRODUCTION: &production
     <<: *testing

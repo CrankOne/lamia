@@ -24,21 +24,14 @@ Lamia provides rudimentary support for monitoring of the running processes via
 RESTful API. This module declares object relational model for running tasks.
 """
 
-import os, yaml, logging.config
+import sys, os, yaml, logging.config
 import flask, flask_restful, flask_cors
 
-gCfgFile = 'assets/configs/rest-srv.yaml'
-
-def create_app():
+def create_app(cfg=None):
     """
     Flask application factory function. See:
         https://flask.palletsprojects.com/en/1.1.x/patterns/appfactories/
     """
-    # Load config
-    cfgMode = os.environ.get('FLASK_ENV', 'PRODUCTION')
-    with open(gCfgFile) as f:
-        cfg_ = yaml.load(f)
-    cfg = cfg_[cfgMode]
     # Configure logging
     logging.config.dictConfig( cfg['logging'] )
     # Instantiate application
@@ -88,4 +81,17 @@ def create_app():
         def root_view():
             return 'Here be dragons.'
         return app
+
+if "__main__" == __name__:
+    inputFileName = sys.argv[1] if len(sys.argv) > 1 else 'assets/configs/rest-srv.yaml'
+    with open(inputFileName) as f:
+        cfg_ = yaml.load(f)
+    cfgMode = os.environ.get('FLASK_ENV', 'PRODUCTION')
+    cfg = cfg_[cfgMode]
+    backendStr = cfg.get( 'backend', 'waitress' )
+    if 'waitress' == backendStr:
+        import waitress
+        waitress.serve( create_app(cfg)
+                      , host=cfg.get('host', '0.0.0.0')
+                      , port=cfg.get('port', 8088) )
 

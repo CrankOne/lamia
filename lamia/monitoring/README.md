@@ -82,3 +82,36 @@ To check basic communication using `curl` do:
     $ lamia/tests/curl_post_monit.sh
 
 console log will depict basic ideas behind the interaction with API.
+
+## Running on production server
+
+Proposed approach to run Lamia monitoring server is to use Waitress here.
+To accomplish running on production, consider the following stages on
+RHEL-family distro:
+
+1. Make a virtual environment for the Lamia to run somewhere. Do not forget to
+provide the virtual environment or system python installation with modules
+necessary for your preferable database back-end.
+
+2. Create a system (no home, no login, etc.) user called, e.g. `lamiasrv`:
+
+    # useradd -r lamiasrv
+
+3. Assemble the binary distribution package from sources with
+
+    $ python setup.py bdist_wheel
+
+and copy the package file (named like `lamia_templates-0.1.0-py3-none-any.whl`)
+to production host if need.
+
+4. Create directory for logging and change owner to newly-created user:
+
+    # mkdir /var/log/lamia
+    # chown lamiasrv:lamiasrv /var/log/lamia
+
+5. Copy and/or edit the `share/lamia/rest-srv.yaml` config w.r.t. to logging
+directories, preferred database back-end, etc.
+
+6. Edit the `share/lamia/service` file w.r.t. to virtual environment location,
+lamia config, user. Copy it to `/etc/systemd/system/lamia-monitoring.service`
+

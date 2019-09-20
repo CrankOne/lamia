@@ -1,0 +1,12 @@
+[Unit]
+Description=Lamia Monitoring RESTful Server
+After=network.target
+
+[Service]
+User=lamiasrv
+Environment=FLASK_ENV=PRODUCTION
+ExecStart={{ venv_home }}/bin/python -m lamia.monitoring.app {{ lamia_config }}
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
