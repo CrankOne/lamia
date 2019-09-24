@@ -22,7 +22,7 @@
 import abc, os, logging, sys, copy, argparse, re, enum, itertools, networkx
 import lamia.core.configuration \
      , lamia.logging \
-     , lamia.core.task
+     , lamia.core.task \
      , lamia.monitoring.client
 
 rxArg = re.compile(r'^(?P<key>\w+):(?P<backend>\w+)?=(?P<value>.*)$')
@@ -406,8 +406,13 @@ class BatchTask( lamia.core.task.Task
     __commonParameters = gCommonParameters
 
     def setup_monitoring( self, monitoringAddr ):
+        L = logging.getLogger(__name__)
         self._monitoringAPI = \
             lamia.monitoring.client.setup_monitoring_on_dest( monitoringAddr )
+        if not self.monitor:
+            L.warning('Remote Lamia monitoring is disabled (%s).'%(
+                'no host specified' if not monitoringAddr else 'failed to initialize client API' ))
+            raise NotImplementedError('xxx')  # XXX
 
     def setup_backend( self, backend
                            , backendConfig=None ):
@@ -420,8 +425,8 @@ class BatchTask( lamia.core.task.Task
                                            , backendConfig
                                            , self.monitor )
 
-    def run(self, *args, **kwargs):
-        super().run(*args, **kwargs)
+    #def run(self, *args, **kwargs):
+    #    super().run(*args, **kwargs)
 
     @property
     def backend(self):
@@ -430,7 +435,7 @@ class BatchTask( lamia.core.task.Task
                     ' Use setup_backend() method to instantiate one.')
         return self._backend
 
-    @propert
+    @property
     def monitor(self):
         if not hasattr(self, '_monitoringAPI'):
             raise RuntimeError('Monitoring API is not (yet) initialized.' )

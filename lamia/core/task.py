@@ -87,25 +87,29 @@ class Task(object):
         L = logging.getLogger()
         if self._userDefaults is None:
             self._userDefaults = {}
+        unusedUserDfts = set(self._userDefaults.keys())
         self._argNames = set()
         for pName, pDescr in ps.items():
             if '@' != pName[0]:
                 shortcut, name = _argparse_par(pName) #list(filter(lambda x: x, _argparse_par(pName)))
                 self._argNames.add( name if name else shortcut )
                 assert( name or shortcut )
-                if shortcut: shortcut = '-' + inflection.dasherize(shortcut)
-                if name: name = '--' + inflection.dasherize(name)
-                nms = list(filter(lambda x: x, [shortcut, name]))
                 if name and name in self._userDefaults:
                     pDescr['default'] = self._userDefaults[name]
                     L.debug( '{name} default is set/overriden by users {value}'.format(
                         name=name if name else shortcut, value=self._userDefaults[name] ) )
+                    unusedUserDfts.remove(name)
+                if shortcut: shortcut = '-' + inflection.dasherize(shortcut)
+                if name: name = '--' + inflection.dasherize(name)
+                nms = list(filter(lambda x: x, [shortcut, name]))
                 self.argParser.add_argument( *nms
                                            , **pDescr )
                 L.debug( '"%s" named command-line arg added'%(', '.join(nms)) )
             else:
                 self.argParser.add_argument( pName[1:], **pDescr )
                 L.debug('Added a positional argument.')
+        if unusedUserDfts:
+            L.warning( 'Unused user defaults: %s'%(', '.join(unusedUserDfts)) )
 
     def _instantiate_arg_parser(self):
         L = logging.getLogger(__name__)
@@ -151,7 +155,7 @@ class Task(object):
         if not (hasattr(self, '_main') and self._main):
             L.error( 'Entry point is not defined by task instance.' )
             return 1
-        if overrideDefaults and hasattr(self, '_p') ):
+        if overrideDefaults and hasattr(self, '_p'):
             # Considered as an erroneous architect.
             raise RuntimeError( "`overrideDefaults' kwarg is provided but"
                     " arg parser already instantiated." )
@@ -160,6 +164,10 @@ class Task(object):
                 for k, v in vars(self.argParser.parse_args(args)).items() }
         L.debug('Run args: %s'%argsDct)
         self.taskCfg = lamia.core.configuration.Stack(argsDct)
+        # For batch-operating task(s), instantiate a monitoring API
+        if isinstance(self, lamia.backend.interface.BatchTask):
+            print('zzz', self.taskCfg['monitoringAddr'])  # XXX
+            self.setup_monitoring( self.taskCfg.get('monitoringAddr', None) )
         return self.taskCfg.apply(self._main)
 
 def cumulative_class_property_getter(prop):

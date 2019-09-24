@@ -57,6 +57,12 @@ class Task(db.Model):
     __tablename__ = 'tasks'
     # Unique label of the particular task
     name = db.Column(db.String, primary_key=True)
+    # User identifier submitted the task
+    username = db.Column(db.String, required=True)
+    # User's e-mail address
+    emailNotify = db.Column(db.String)
+    # Task comment, if any
+    comment = db.Column(db.String)
     # Task submission time and date
     submittedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     # Submission host IP

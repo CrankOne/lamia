@@ -25,13 +25,14 @@ RESTful API. This module defines factory constructor for API of different
 versions.
 """
 
+import os
 import urllib.parse, socket, logging
 from contextlib import closing
 
 def get_api_description_from_path( path ):
     if path:
-        apiPath = p.path
-        apiVer = [ptok for ptok in p.path.split('/') if ptok][-1]
+        apiPath = path
+        apiVer = [ptok for ptok in path.split('/') if ptok][-1]
     else:
         apiPath = '/api/v0/'
         apiVer = 'v0'
@@ -55,13 +56,16 @@ def setup_monitoring_on_dest( monitoringAddr ):
     # Check if monitoring host is available by attempting to open index
     # page.
     try:
-        p = urllib.parse.urlparse( uri )
+        p = urllib.parse.urlparse( monitoringAddr )
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
             sock.settimeout(2)
-            if 0 == sock.connect_ex((p.host, p.port)):
-                L.warning( 'Detination "%s" is not available.'%p.netloc )
+            ec = sock.connect_ex((p.hostname, p.port))
+            if 0 != ec:
+                L.error( 'Destination "%s" (hostname=%s, port=%d) is not'
+                        ' available: "%s"'%(
+                    p.netloc, p.hostname, p.port, os.strerror(ec)) )
                 return None
-        apiVer, apiPath = get_api_description_from_parse_result(p)
+        apiVer, apiPath = get_api_description_from_path(p.path)
         L.info( 'Assuming API of version {apiVer} on host {hostname} with port'
             ' {port} by addr {apiPath}.'.format( hostname=p.hostname
                                                , port=p.port if p.port else '80'
@@ -71,8 +75,8 @@ def setup_monitoring_on_dest( monitoringAddr ):
         api.set_host( p.hostname, p.port )
     except Exception as e:
         L.warning( 'Failed to communicate with monitoring server "%s"'
-                ' due to a runtime error:' )
+                ' due to a runtime error:'%monitoringAddr )
         L.exception( e )
-        L.warning( 'Continuing without monitoring support.' )
+        L.warning( 'Continuing without monitoring support due to previous error.' )
         return None
     return api

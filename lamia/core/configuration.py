@@ -46,7 +46,8 @@ collections within `Configuration' object. Examples:
 """
 
 import yaml, dpath.util, copy, collections, logging, sys \
-     , configparser, json, yaml, re, argparse, inspect
+     , configparser, json, yaml, re, argparse, inspect \
+     , os.path
 import lamia.core.interpolation
 from io import IOBase
 from urllib.parse import urlparse
@@ -85,10 +86,13 @@ def parse_context_stream( argsFPath ):
             file)
         '# YAML' -- for YAML data
         '; INI' -- for INI config.
-    If format is not recognized, raises RunTimeError().
+    If format is not recognized, raises RuntimeError().
     """
     L = logging.getLogger(__name__)
     cfg = None
+    if '-' != argsFPath \
+    and ('$' in argsFPath or '~' in argsFPath):
+        argsFPath = os.path.expanduser(os.path.expandvars(argsFPath))
     if type(argsFPath) is not str:
         raise ValueError('String expected, got: %s'%type(argsFPath))
     elif '-' == argsFPath:
