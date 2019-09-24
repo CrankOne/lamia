@@ -18,6 +18,7 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 """
 Lamia module configuration processing module.
 
@@ -43,6 +44,7 @@ collections within `Configuration' object. Examples:
     spam~=foo:  # remove element "foo" from list "spam"
     ...etc.
 """
+
 import yaml, dpath.util, copy, collections, logging, sys \
      , configparser, json, yaml, re, argparse, inspect
 import lamia.core.interpolation

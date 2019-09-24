@@ -23,12 +23,13 @@ import abc, os, logging, sys, copy, argparse, re, enum, itertools, networkx
 import lamia.core.configuration \
      , lamia.logging \
      , lamia.core.task
+     , lamia.monitoring.client
 
 rxArg = re.compile(r'^(?P<key>\w+):(?P<backend>\w+)?=(?P<value>.*)$')
 
 class BackendCommandError(RuntimeError):
     """
-    An exception class bearing information about error happened during
+    An exception class carrying information about error happened during
     invokation of command sent to the back-end.
     We consider that error is happened if either the Popen() failed, or the
     shell command return code is non-zero. In both cases, user code must be
@@ -340,7 +341,7 @@ def instantiate_backend( name, config, *args, **kwargs ):
         if c.backend_type() == name:
             return c(config, *args, **kwargs)
     raise LookupError("Unable to find batch back-end"
-            " interface implementation \"%s\"."%name)
+            " implementation \"%s\"."%name)
 
 #
 # Utility imperatives
@@ -362,6 +363,14 @@ gCommonParameters = {
     },
     'backend_config' : {
         'help' : "Configuration file for the backend to be used."
+    },
+    'monitoring_addr' : {
+        'help' : "URL of monitoring service."
+    },
+    'monitoring_tag' : {
+        'help' : "Adds a tag for task object taken into account by monitoring"
+            " service that further helps to sort out various tasks.",
+        'action' : "append"
     }
 }
 
@@ -396,10 +405,23 @@ class BatchTask( lamia.core.task.Task
     """
     __commonParameters = gCommonParameters
 
+    def setup_monitoring( self, monitoringAddr ):
+        self._monitoringAPI = \
+            lamia.monitoring.client.setup_monitoring_on_dest( monitoringAddr )
+
     def setup_backend( self, backend
                            , backendConfig=None ):
+        """
+        This method is not by default invoked by `BatchTask' instance since
+        subclasses usually desire to customize the back-end instantiation in
+        some way.
+        """
         self._backend = instantiate_backend( backend
-                                           , backendConfig )
+                                           , backendConfig
+                                           , self.monitor )
+
+    def run(self, *args, **kwargs):
+        super().run(*args, **kwargs)
 
     @property
     def backend(self):
@@ -407,6 +429,12 @@ class BatchTask( lamia.core.task.Task
             raise RuntimeError('Batch back-end is not initialized.'
                     ' Use setup_backend() method to instantiate one.')
         return self._backend
+
+    @propert
+    def monitor(self):
+        if not hasattr(self, '_monitoringAPI'):
+            raise RuntimeError('Monitoring API is not (yet) initialized.' )
+        return self._monitoringAPI
 
 class BatchSubmittingTask( BatchTask
                          , metaclass=lamia.core.task.TaskClass ):
@@ -437,35 +465,17 @@ class BatchSubmittingTask( BatchTask
         'result_format' : "jID={jID}"
     }
 
-    #def submit( self, fwd
-    #          , jobName=None, nProcs=1
-    #          , stdoutLog=None, stderrLog=None
-    #          , backendArguments={} ):
-    #    try:
-    #        r = self.backend.queue( jobName, nProcs=nProcs
-    #                               , cmd=fwd
-    #                               , stdout=stdoutLog, stderr=stderrLog
-    #                               , backendArguments=backendArguments )
-    #    except JListFailure as e:
-    #        sys.stderr.write( 'Submission error occured: rc=%s\n'%e.output['rc'] )
-    #        if not e.exception:
-    #            L.error( '<submission command stdout>:\n' )
-    #            L.error( e.output['stdout'].decode('ascii') )
-    #            L.error( '<submission command stderr>:\n' )
-    #            L.error( e.output['stderr'].decode('ascii') )
-    #        else:
-    #            L.exception( e.exception )
-    #    return r
-
     def _main( self
              , fwd=[]
              , backend=None, backendConfig=None
              , stderrLog=None, stdoutLog=None
              , jobName=None
              , backendArguments={}
+             , monitoringAddr=None
              , resultFormat='' ):
         L = logging.getLogger(__name__)
         self.setup_backend( backend, backendConfig )
+        #TODO: self.setup_monitoring()?
         if not fwd:
             self.argParser.error( 'Nothing to submit.' )
         if not jobName:
@@ -476,6 +486,7 @@ class BatchSubmittingTask( BatchTask
                        , backendArguments=backendArguments )
         self.dispatch_jobs( jq )
         sys.stdout.write( resultFormat.format(**r.fields) )
+        # TODO: notify monitoring service that task was submitted?
         return 0
 
 class BatchListingTask( BatchTask

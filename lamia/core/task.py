@@ -67,9 +67,9 @@ def _argparse_par(s):
 
 class Task(object):
     """
-    The `Task' abstraction states an implication that all runnable procedure
-    may be invoked directly, by specifying a set of the input arguments that
-    may be provided by set of command line arguments.
+    The `Task' abstraction implies that all runnable procedures may be invoked
+    directly (i.e. without any additional setup), by specifying a set of the
+    input arguments that may be provided by set of command line arguments.
     To achieve this, we assume:
         1. The set of arguments may be splitted into two sub-sets:
             1.a) A reentrant arguments that potentially might be supplied by
@@ -85,6 +85,8 @@ class Task(object):
     """
     def add_parameters(self, ps):
         L = logging.getLogger()
+        if self._userDefaults is None:
+            self._userDefaults = {}
         self._argNames = set()
         for pName, pDescr in ps.items():
             if '@' != pName[0]:
@@ -94,6 +96,10 @@ class Task(object):
                 if shortcut: shortcut = '-' + inflection.dasherize(shortcut)
                 if name: name = '--' + inflection.dasherize(name)
                 nms = list(filter(lambda x: x, [shortcut, name]))
+                if name and name in self._userDefaults:
+                    pDescr['default'] = self._userDefaults[name]
+                    L.debug( '{name} default is set/overriden by users {value}'.format(
+                        name=name if name else shortcut, value=self._userDefaults[name] ) )
                 self.argParser.add_argument( *nms
                                            , **pDescr )
                 L.debug( '"%s" named command-line arg added'%(', '.join(nms)) )
@@ -130,22 +136,30 @@ class Task(object):
             self._instantiate_arg_parser()
         return self._p
 
-    #def eval_deps(self):
-    #    """
-    #    Evaluates dependencies, if any.
-    #    """
-    #    pass
-
-    def run(self, args=sys.argv[1:]):
+    def run(self, args=sys.argv[1:], overrideDefaults=None):
+        """
+        Runs task. If user config (`overrideDefaults') is given (not being set
+        to None), it will override default parameters from command line
+        arguments (but if command-line parameters are set to non-default values
+        they take precedence). Priority (bigger override lower):
+            1. default parameters set by routines themselves
+            2. parameters from user config (`overrideDefaults')
+            3. parameters supplied by command line
+        In case of lists, the values will be stacked up.
+        """
         L = logging.getLogger()
         if not (hasattr(self, '_main') and self._main):
             L.error( 'Entry point is not defined by task instance.' )
             return 1
+        if overrideDefaults and hasattr(self, '_p') ):
+            # Considered as an erroneous architect.
+            raise RuntimeError( "`overrideDefaults' kwarg is provided but"
+                    " arg parser already instantiated." )
+        self._userDefaults = overrideDefaults
         argsDct = { inflection.camelize(k, uppercase_first_letter=False) : v \
                 for k, v in vars(self.argParser.parse_args(args)).items() }
         L.debug('Run args: %s'%argsDct)
         self.taskCfg = lamia.core.configuration.Stack(argsDct)
-        #self.eval_deps()
         return self.taskCfg.apply(self._main)
 
 def cumulative_class_property_getter(prop):
