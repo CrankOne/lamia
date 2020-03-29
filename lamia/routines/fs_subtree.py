@@ -216,10 +216,23 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
 
     @property
     def rStk(self):
+        L = logging.getLogger(__name__)
         if not hasattr(self, '_rStk'):
             ctxs = self._contexts
             if self._pathCtxs:
-                ctxs = [c.format(**self.pStk) if type(c) is str else c for c in self._contexts]
+                try:
+                    ctxs = [c.format(**self.pStk) if type(c) is str else c for c in self._contexts]
+                except KeyError as e:
+                    # Too much automatization is pretty common issue, huh?
+                    # You did not yet finished to compose the path-rendering
+                    # context stack, but already trying to access some
+                    # context/config based on the information by templated
+                    # path.
+                    L.error( 'Probably incomplete path-rendering context'
+                            ' during rendering one of the paths for context'
+                            ' files: %s. Leading to the exception being raised'
+                            ' now.'%(', '.join([str(c) for c in self._contexts if type(c) is str]) ) )
+                    raise
             self._rStk = lamia.core.configuration.compose_stack( ctxs, self._ctxDefs )
         return self._rStk
 

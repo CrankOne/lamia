@@ -153,7 +153,7 @@ class Submission(abc.ABC):
         lengths = [ len(a) if type(a) in (set, list, tuple) else 1 for a in self.tCmd[1:] ]
         return functools.reduce( lambda p, x: p*x, lengths )
 
-    def __init__( self, jobName, tCmd, nProcs ):
+    def __init__( self, jobName, tCmd, nProcs, minSuccess=None ):
         self._deps = []
         self._jobName = jobName
         self.stdin = None
@@ -170,6 +170,7 @@ class Submission(abc.ABC):
             raise TypeError( "First argument for submit is expected to be' \
                     ' either str or list. Got %s."%type(tCmd) )
         self._nProcs = nProcs or 1
+        self.minSuccess = minSuccess
 
     def acquire_stdin_input(self):
         self.stdin = ''
@@ -204,7 +205,7 @@ class BatchBackend(abc.ABC):
     instance of arbitrary type that must be returned by submit() and understood
     by kill.../wait.../get_status/.../etc. methods.
     """
-    def __init__( self, config ):
+    def __init__( self, config, monitor=None ):
         """
         Ctr accepts a config object of form sutable for
         lamia.core.configuration.Configuration instance.
@@ -212,6 +213,7 @@ class BatchBackend(abc.ABC):
         L = logging.getLogger(__name__)
         self.cfg = lamia.core.configuration.Stack()
         self.cfg.push(lamia.core.configuration.Configuration(config))
+        self.monitor = monitor
 
     @property
     @abc.abstractmethod
@@ -371,6 +373,12 @@ gCommonParameters = {
         'help' : "Adds a tag for task object taken into account by monitoring"
             " service that further helps to sort out various tasks.",
         'action' : "append"
+    },
+    'monitoring_user' : {
+        'help' : "Username to sign the tasks on the monitoring systems side"
+    },
+    'monitoring_email' : {
+        'help' : "e-mail address for the online monitoring system"
     }
 }
 
@@ -405,14 +413,14 @@ class BatchTask( lamia.core.task.Task
     """
     __commonParameters = gCommonParameters
 
-    def setup_monitoring( self, monitoringAddr ):
+    def setup_monitoring( self, monitoringAddr, **kwargs ):
         L = logging.getLogger(__name__)
         self._monitoringAPI = \
-            lamia.monitoring.client.setup_monitoring_on_dest( monitoringAddr )
+            lamia.monitoring.client.setup_monitoring_on_dest( monitoringAddr, **kwargs )
         if not self.monitor:
             L.warning('Remote Lamia monitoring is disabled (%s).'%(
-                'no host specified' if not monitoringAddr else 'failed to initialize client API' ))
-            raise NotImplementedError('xxx')  # XXX
+                'no host specified' if not monitoringAddr else \
+                        'failed to initialize client API' ))
 
     def setup_backend( self, backend
                            , backendConfig=None ):
@@ -423,7 +431,7 @@ class BatchTask( lamia.core.task.Task
         """
         self._backend = instantiate_backend( backend
                                            , backendConfig
-                                           , self.monitor )
+                                           , monitor=self.monitor )
 
     #def run(self, *args, **kwargs):
     #    super().run(*args, **kwargs)

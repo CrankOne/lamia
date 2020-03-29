@@ -98,6 +98,9 @@ be provided:
   loading additional context data for particular template rendering. E.g. when
   this additional data may lead to significant overhead or destructively
   mutates context data.
+* ``conditions`` is a list of strings containing Python code prefixed by
+  ``eval:`` that conditionally enables rendering of template depending on
+  current path context.
 
 Examples
 --------

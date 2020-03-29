@@ -269,12 +269,13 @@ class _RecursiveTemplatesHandler(object):
             rTxt = self.renderers['default'](template, **context)
         elif type(template) is dict:
             ctxStk = LC.Stack(dict(context))
+            # TODO: document context hooks technique
             for ctxHookName in template.get('contextHooks', []):
                 ctxh = contextHooks[ctxHookName]
                 if callable(ctxh):
-                    # TODO: document context hooks technique
                     v = ctxh( template, path, context )
                 else:
+                    # this case corresponds to somehow manually-injected dict
                     v = ctxh
                 ctxStk.push(v, tag=ctxHookName)
             if 'id' in template.keys():

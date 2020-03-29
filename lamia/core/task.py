@@ -87,7 +87,7 @@ class Task(object):
         L = logging.getLogger()
         if self._userDefaults is None:
             self._userDefaults = {}
-        unusedUserDfts = set(self._userDefaults.keys())
+        usedUserDfts = set(self._userDefaults.keys())
         self._argNames = set()
         for pName, pDescr in ps.items():
             if '@' != pName[0]:
@@ -98,7 +98,7 @@ class Task(object):
                     pDescr['default'] = self._userDefaults[name]
                     L.debug( '{name} default is set/overriden by users {value}'.format(
                         name=name if name else shortcut, value=self._userDefaults[name] ) )
-                    unusedUserDfts.remove(name)
+                    usedUserDfts.add(name)
                 if shortcut: shortcut = '-' + inflection.dasherize(shortcut)
                 if name: name = '--' + inflection.dasherize(name)
                 nms = list(filter(lambda x: x, [shortcut, name]))
@@ -108,21 +108,24 @@ class Task(object):
             else:
                 self.argParser.add_argument( pName[1:], **pDescr )
                 L.debug('Added a positional argument.')
-        if unusedUserDfts:
-            L.warning( 'Unused user defaults: %s'%(', '.join(unusedUserDfts)) )
+        return usedUserDfts
 
     def _instantiate_arg_parser(self):
         L = logging.getLogger(__name__)
         self._p = argparse.ArgumentParser( self.__class__.__doc__,
                 epilog=getattr( self.__class__
                               , '_%s__epilog'%self.__class__.__name__, None ) )
+        usedUserDfts = set()
         for pN in ['common_parameters', 'exec_parameters']:
             ps = getattr(self, 'get_%s'%pN)()
             L.debug( 'Task base class: got list of length %d for "%s".'%(
                 len(ps), pN ) )
             ps = lamia.core.configuration.Stack( ps if ps else [] )
             L.debug( 'Top entities in stack: %s.'%(', '.join( '"%s"'%k for k in ps.keys() )) )
-            self.add_parameters( ps )
+            usedUserDfts |= self.add_parameters( ps )
+        unusedUserDfts = set(self._userDefaults.keys()) - usedUserDfts
+        if unusedUserDfts:
+            L.warning( 'Unused user defaults: %s'%(', '.join(unusedUserDfts)) )
         #self.add_parameters( lamia.core.configuration.Stack(self.get_common_parameters()) )
         #self.add_parameters( lamia.core.configuration.Stack(self.get_exec_parameters()) )
         dfts = self.get_defaults()
@@ -166,8 +169,12 @@ class Task(object):
         self.taskCfg = lamia.core.configuration.Stack(argsDct)
         # For batch-operating task(s), instantiate a monitoring API
         if isinstance(self, lamia.backend.interface.BatchTask):
-            print('zzz', self.taskCfg['monitoringAddr'])  # XXX
-            self.setup_monitoring( self.taskCfg.get('monitoringAddr', None) )
+            self.setup_monitoring(          self.taskCfg.get('monitoringAddr', None)
+                                 ,     tags=self.taskCfg.get('monitoringTag', None)
+                                 ,  comment=self.taskCfg.get('monitoringComment', None)
+                                 , username=self.taskCfg.get('monitoringUser', None)
+                                 ,    email=self.taskCfg.get('monitoringEmail', None)
+                                 )
         return self.taskCfg.apply(self._main)
 
 def cumulative_class_property_getter(prop):

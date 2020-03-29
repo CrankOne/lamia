@@ -45,7 +45,9 @@ def instantiate_client_API( apiVer, apiPath ):
     else:
         raise RuntimeError( 'Unknown client API version: "%s".'%apiVer )
 
-def setup_monitoring_on_dest( monitoringAddr ):
+def setup_monitoring_on_dest( monitoringAddr
+                            , tags=None, comment=None
+                            , username=None, email=None ):
     """
     Returns instantiated API instance if host is available or `None' otherwise.
     """
@@ -73,6 +75,10 @@ def setup_monitoring_on_dest( monitoringAddr ):
                                                , apiPath=apiPath ) )
         api = instantiate_client_API( apiVer, apiPath )
         api.set_host( p.hostname, p.port )
+        api.taskPayload['tags'] = tags
+        api.taskPayload['comment'] = comment
+        api.taskPayload['username'] = username
+        api.taskPayload['emailNotify'] = email
     except Exception as e:
         L.warning( 'Failed to communicate with monitoring server "%s"'
                 ' due to a runtime error:'%monitoringAddr )

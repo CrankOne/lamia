@@ -110,7 +110,9 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
             r['subTag'] = 'single'
         return r
 
-    def _mk_subm_classAd( self, nProcs, cad, submissionTag=None ):
+    def _mk_subm_classAd( self, nProcs, cad, submissionTag=None
+            , jobName=None  # used only if monitor isn't None
+            , monitor=None ):
         L = logging.getLogger(__name__)
         # NOTE: the native `classad' module's instances seems to be pretty
         # useless due to their rudimentary serialization mechanism. Writing the
@@ -151,6 +153,12 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
             cad['environment'] = {}
         cad['environment']['HTCONDOR_JOBINDEX'] = '$(Process)' \
                                             if self.nProcs else 'SINGLE'
+        if monitor:
+            if 'JOB_EVENT_ADDR' in cad:
+                L.error( "The `JOB_EVENT_ADDR' specified for the environment"
+                        " will be overriden." )
+            cad['environment']['JOB_EVENT_ADDR'] = monitor.job_event_address( jobName
+                    , '$(Process)' if self.nProcs else None )
         if len(self.tCmd) > 1:
             if not self.isImplicitArray:
                 cad["arguments"] = self.tCmd[1:]
@@ -168,7 +176,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
             # procedure. In case of iterative tasks, however, this error may
             # indicate an absent `submissionFile' parameter.
             L.warning( 'HTCondor submission file "%s" exists'
-                    ' and will be re-written.'%submissionFilePath )
+                    ' and will be overwritten.'%submissionFilePath )
         with open(submissionFilePath, 'w') as f:
             for k, v in cad.items():
                 if 'queue' == k:
@@ -181,6 +189,9 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 elif type(v) is dict:
                     # we escape the double quotes here (acc. to
                     # `man condor_submit' it has been done with double-quotes (""))
+                    # see also:
+                    #   https://research.cs.wisc.edu/htcondor/manual/v7.8/condor_submit.html#76968
+                    # for reference.
                     strV = '"%s"'%(' '.join(['%s=%s'%(k, vv.replace('"', '""')) \
                                                 for k, vv in v.items()]))
                 else:
@@ -201,7 +212,8 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 , timeout=300
                 , submissionTag=None
                 , backendArguments={}
-                , popenKwargs={} ):
+                , popenKwargs={}
+                , monitor=None ):
         L = logging.getLogger(__name__)
         self.condorSubmitExec = cfg['execs.condorSubmit']
         self.condorSubmitArgs = copy.deepcopy(cfg['condorSubmit'])
@@ -217,10 +229,13 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
         baseAd = copy.deepcopy( cfg['classAds.submit'] )
         baseAd.update({
                 'output' : stdout.format(**self.macros()),
-                'error' : stderr.format(**self.macros())
+                'error' : stderr.format(**self.macros()),
             })
-        self.submissionFilePath = self._mk_subm_classAd( nProcs, baseAd,
-                submissionTag=submissionTag )
+        # TODO: inject environemnt variabl for monitoring
+        self.submissionFilePath = self._mk_subm_classAd( nProcs, baseAd
+                , submissionTag=submissionTag
+                , monitor=monitor
+                , jobName=jobName )
         self.cmd = [ cfg['execs.condorSubmit'], self.submissionFilePath
                , '-terse'
                , '-batch-name', jobName
@@ -281,21 +296,21 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             L.warning('Job submission have no "userLog" attribute.')
         return ret
 
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, monitor=None):
+        super().__init__(config, monitor=monitor)
 
     def queue(self, jobName, **kwargs):
         """
         Submit the job to HTCondor
         Will forward `cmd' as a string within the `subprocess.Popen'.
 
-        Important `backendArguments' entry is a "submissionFile" that shall denote a
-        file where corresponding submission classAd will be generated. If it
-        is not provided, the first `cmd' entry will be considered as a filename
-        to which we append a `.sub' postfix and use resulting path for
+        Important `backendArguments' entry is a "submissionFile" that shall
+        denote a file where corresponding submission classAd will be generated.
+        If it is not provided, the first `cmd' entry will be considered as a
+        filename to which we append a `.sub' postfix and use resulting path for
         generating a submission file.
         """
-        return HTCondorShellSubmission( jobName, self.cfg, **kwargs )
+        return HTCondorShellSubmission( jobName, self.cfg, monitor=self.monitor, **kwargs )
 
     def dispatch_jobs(self, js, DAGFilePath=None):
         L = logging.getLogger(__name__)
@@ -303,7 +318,10 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             if not js.dependencies:
                 # Trivial case -- no dependencies => no additional operations
                 # needed, straigtforward submission.
-                return self._submit( js )
+                rs = self._submit( js )
+                if self.monitor:
+                    self.monitor.follow_task(js)
+                return rs
             js = [js]
         # Hereafter use networkx to build the DAG (which then will be rendered
         # into HTCondor's DAGMan file).
@@ -363,9 +381,12 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         if 0 != rc:
             L.error("`%s' exited with code %d; stderr:\n%s"%(
                 ' '.join(sCmd), rc, err.decode() ))
-        elif err:
-            L.warning("`%s' stderr message(s):\n%s"%(
-                ' '.join(sCmd), err.decode()))
+        else:
+            if err:
+                L.warning("`%s' stderr message(s):\n%s"%(
+                    ' '.join(sCmd), err.decode()))
+            if self.monitor:
+                self.monitor.follow_task(js)
         ret = { 'out' : [] }
         for m in rxHTCondorDAGOutParLine.finditer( out.decode() ):
             ret['out'].append( m.groupdict() )
