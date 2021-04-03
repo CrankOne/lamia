@@ -233,7 +233,7 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
                             ' files: %s. Leading to the exception being raised'
                             ' now.'%(', '.join([str(c) for c in self._contexts if type(c) is str]) ) )
                     raise
-            self._rStk = lamia.core.configuration.compose_stack( ctxs, self._ctxDefs )
+            self._rStk = lamia.core.configuration.compose_stack( ctx=ctxs, defs=self._ctxDefs )
         return self._rStk
 
     def set_path_templating( self, pathContexts, pathDefinitions=[] ):
