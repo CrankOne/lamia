@@ -117,7 +117,7 @@ class LamiaMonitoringAPI(object):
                  #, 'username' : (from payload)
                  #, 'comment' : (from payload)
         }
-        # Reqursively traverse job deps, acquiring all the processes --
+        # Recursively traverse job deps, acquiring all the processes --
         # standalone and arrays
         def _collect_deps( ps ):
             for j in ps if type(ps) in (tuple, list) else (ps,):
