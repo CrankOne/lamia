@@ -223,7 +223,6 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
                 try:
                     ctxs = [c.format(**self.pStk) if type(c) is str else c for c in self._contexts]
                 except KeyError as e:
-                    # Too much automatization is pretty common issue, huh?
                     # You did not yet finished to compose the path-rendering
                     # context stack, but already trying to access some
                     # context/config based on the information by templated
@@ -232,6 +231,9 @@ class DeploymentEnv(lamia.routines.render.TemplateEnvironment):
                             ' during rendering one of the paths for context'
                             ' files: %s. Leading to the exception being raised'
                             ' now.'%(', '.join([str(c) for c in self._contexts if type(c) is str]) ) )
+                    raise
+                except:
+                    L.error('While formatting one of contexts "%s"'%(', '.join(str(c) for c in self._contexts if type(c) is str)))
                     raise
             self._rStk = lamia.core.configuration.compose_stack( ctx=ctxs, defs=self._ctxDefs )
         return self._rStk
