@@ -66,7 +66,12 @@ def validate_input( inputSchema ):
                                         resourceName=f.__name__.upper() # TODO: retrieve class name?
                                     ) )
                     return f( *args, **kwargs )
-                vd = flask.request.get_json()
+                if not flask.request.is_json:
+                    L.warning('Request data is not marked as JSON. Trying to'
+                        'interpret it anyway.' )
+                    vd = flask.request.get_json(force=True)
+                else:
+                    vd = flask.request.get_json()
                 for k in list(kwargs.keys()):
                     if not k.startswith('_'):
                         vd[k] = kwargs.pop(k)

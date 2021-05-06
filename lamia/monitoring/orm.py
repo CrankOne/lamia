@@ -58,7 +58,7 @@ class Task(db.Model):
     # Unique label of the particular task
     name = db.Column(db.String, primary_key=True)
     # User identifier submitted the task
-    username = db.Column(db.String, required=True)
+    username = db.Column(db.String)
     # User's e-mail address
     emailNotify = db.Column(db.String)
     # Task comment, if any

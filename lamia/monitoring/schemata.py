@@ -51,9 +51,10 @@ import lamia.monitoring.app
 
 ma = Marshmallow(app)
 
-class BaseSchema(ma.ModelSchema):
+class BaseSchema(ma.SQLAlchemyAutoSchema):  # before marshmallow 0.12 it was ModelSchema
     class Meta:
         sqla_session = db.session
+        load_instance = True
 
 class MetaSchema(marshmallow.Schema):
     """
