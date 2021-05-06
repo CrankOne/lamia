@@ -13,8 +13,8 @@ enough to integrate with existing batch-scheduling solutions (like
 were designed to simplify the scheduling and their focus lies on the
 conditioning of the workflow dependencies rather then configuration of each
 particulat job. At the same time systems like [PanDA](pandawms.org) and
-[Pegasus](https://pegasus.isi.edu/) appears to be a way overencumbered and too
-complicated for fast prototyping purposes.
+[Pegasus WMS](https://pegasus.isi.edu/) appears to be a way overencumbered and
+too complicated for fast prototyping purposes.
 
 The Lamia focuses more on the creation of _supporting environment_ for
 the individual batch jobs and tasks with well-known and rigid workflows:
