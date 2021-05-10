@@ -40,7 +40,7 @@ class LamiaMonitoringAPI(object):
         self._path = path
         # This properties will be sent as task payload
         self.taskName = None
-        self.taskConfigs = None
+        self._taskPayload = {}
 
     @property
     def hostURL(self):
@@ -83,7 +83,6 @@ class LamiaMonitoringAPI(object):
             L.warning(f'Refusing to set "{label}" property of task payload'
                 ' monitoring message.')
             return False
-        self._taskPayload[label] = value
         if label in ('username', 'emailNotify', 'comment'):
             assert type(value) is str
         elif 'tags' == label:
@@ -93,6 +92,7 @@ class LamiaMonitoringAPI(object):
             assert type(value) in (str, dict, tuple, list)
         else:
             assert False
+        self._taskPayload[label] = value
         return True
 
     def job_event_address(self, processName, arrayNum=None):
@@ -101,11 +101,16 @@ class LamiaMonitoringAPI(object):
         """
         p = os.path.join(self.get_task_URI_base(), processName)
         if arrayNum is not None:
-            p += '?arrayIndex=%s'%str(arrayNum)
+            p += '/event?arrayIndex=%s'%str(arrayNum)
         return p
 
     def get_task_URI_base(self, taskName=None):
+        """
+        Returns base task URI. If taskName kwarg is given, the rendered path
+        is for task name provided, otherwise own task name is used.
+        """
         if not taskName:
+            assert(self._taskName)
             taskName = self._taskName
         return '{baseURL}/{taskName}'.format(baseURL=self.hostURL, taskName=taskName)
 
@@ -124,6 +129,10 @@ class LamiaMonitoringAPI(object):
             g = functools.reduce( _dep_convolution, [networkx.DiGraph()] + list(js) )
             dgpckl = io.BytesIO()
             networkx.write_gpickle(g, dgpckl)
+            g = base64.b64encode(bz2.compress(dgpckl.getvalue())).decode()
+        else:
+            dgpckl = io.BytesIO()
+            networkx.write_gpickle(js.depGraph, dgpckl)
             g = base64.b64encode(bz2.compress(dgpckl.getvalue())).decode()
         # request data dict, to be updated with "task payload" dict
         rqData = { '_meta' : { 'host' : socket.gethostname()
@@ -156,6 +165,10 @@ class LamiaMonitoringAPI(object):
         _collect_deps( js )
         # update the request data with "task payload"
         rqData.update(self._taskPayload)
+        if 'config' in rqData and rqData['config']:
+            if rqData['config']:
+                rqData['config'] = base64.b64encode(bz2.compress(pickle.dumps(rqData['config']))).decode()
+            #rqData['config'] = json.dumps(rqData['config'], default=str)
         #
         #print( 'data to sent:', json.dumps(rqData, sort_keys=True, indent=2) )  # XXX
         #print('xxx', self.get_task_URI_base())
@@ -169,7 +182,7 @@ class LamiaMonitoringAPI(object):
         #print(response)
         # Send the request
         r = requests.post( self.get_task_URI_base()
-                         , json=json.dumps(rqData, default=str)
+                         , json=rqData
                          #, headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
                          # ^^^ weirdly, the `requests' does not always has
                          # JSON mimetype...

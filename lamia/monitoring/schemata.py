@@ -55,6 +55,7 @@ class BaseSchema(ma.SQLAlchemyAutoSchema):  # before marshmallow 0.12 it was Mod
     class Meta:
         sqla_session = db.session
         load_instance = True
+        include_relationships = True
 
 class MetaSchema(marshmallow.Schema):
     """

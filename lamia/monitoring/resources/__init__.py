@@ -60,11 +60,8 @@ def validate_input( inputSchema ):
             L = logging.getLogger(__name__)
             try:
                 if not hasSchema:
-                    L.warning( 'No input schema defined for method "{method}"'
-                        ' of the resource "{resourceName}."'.format(
-                                        method=flask.request.method,
-                                        resourceName=f.__name__.upper() # TODO: retrieve class name?
-                                    ) )
+                    L.warning( f'No input schema defined for method "{f.__name__.upper()}"'
+                        f' of the resource method "{f.__qualname__}".' )
                     return f( *args, **kwargs )
                 if not flask.request.is_json:
                     L.warning('Request data is not marked as JSON. Trying to'
@@ -72,6 +69,7 @@ def validate_input( inputSchema ):
                     vd = flask.request.get_json(force=True)
                 else:
                     vd = flask.request.get_json()
+                assert(type(vd) is dict)
                 for k in list(kwargs.keys()):
                     if not k.startswith('_'):
                         vd[k] = kwargs.pop(k)

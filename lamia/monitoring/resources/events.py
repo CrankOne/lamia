@@ -49,7 +49,7 @@ class Events(flask_restful.Resource):
             p = S.query(models.Array).filter_by( taskID=taskName
                                                , name=procName ).one()
             evs = S.query(models.Event).filter_by( process=p
-                                                 , procNumInArray=arrayIndex ).all()
+                                                 , procNumInArray=int(arrayIndex) ).all()
         else:
             p = S.query(models.Process).filter_by( taskID=taskName
                                                  , name=procName ).one()
@@ -80,7 +80,7 @@ class Events(flask_restful.Resource):
                                                , taskID=taskName).one()
             arrayIndex = int(arrayIndex)
             if arrayIndex > j.nJobs \
-            or 0 == arrayIndex:
+            or 0 > arrayIndex:
                 resp['errors'] = [{ 'reason' : 'Process index is not in range.'
                                   , 'details' : { 'index' : arrayIndex
                                                 , 'nJobs' : j.nJobs
@@ -106,5 +106,6 @@ class Events(flask_restful.Resource):
         S.add( event )
         S.commit()
         resp['created'] = True
+        # TODO: check the fTolerance/thrProgress
         return resp, 201
 
