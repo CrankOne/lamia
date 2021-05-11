@@ -105,6 +105,9 @@ class Process(db.Model):
     __tablename__ = 'processes'
     # If process not within an array: process name
     name = db.Column(db.String, primary_key=True)
+    # Progress threshold; cumulative progress must be this big before API
+    # starts to respond "enough" to the processes
+    thresholdProgress = db.Column(db.Integer, nullable=True)
     # If process not within an array: owning task ID
     taskID = db.Column(db.String, db.ForeignKey('tasks.name'), primary_key=True)
     task = db.relationship('Task', back_populates='processes')
@@ -128,9 +131,21 @@ class Process(db.Model):
         """
         L, S = logging.getLogger(__name__), db.session
         lec = S.query(Event.eventClass).filter( and_( Event.taskID == self.taskID
-                                          , Event.procID == self.name ) ) \
+                                              , Event.procID == self.name ) ) \
                 .order_by(Event.recievedAt.desc()).first()
         return lec[0] if lec else None
+
+    @sqlalchemy.ext.hybrid.hybrid_property
+    def progress(self):
+        """
+        Returns the overall progress estimation for the process by retrieving
+        maximum "progress" value among all the events related to this process.
+        """
+        L, S = logging.getLogger(__name__), db.session
+        return S.query(sqlalchemy.func.max(Event.progress)) \
+                 .filter( and_( Event.taskID == self.taskID
+                              , Event.procID == self.name )
+                        ).scalar()
 
 class Array(Process):
     """
@@ -138,6 +153,9 @@ class Array(Process):
     additional property of this model is fault tolerance: number of the
     processes within the array that might end up with failure but the array
     has to be still considered as successfull.
+    The overall progress is also an important indicator allowing one to quench
+    processes after some threshold. The progress in case of job arrays has to
+    be (usually) estimated as a sum of individual job progress estimations.
     """
     __tablename__ = 'arrays'
     name = db.Column(db.String, primary_key=True)
@@ -146,12 +164,34 @@ class Array(Process):
     nJobs = db.Column(db.Integer, nullable=False)
     # Might not be set, indicating no failure tolerance here
     fTolerance = db.Column(db.Integer, nullable=True)
+    #
     __mapper_args__ = { 'polymorphic_identity': kArrayProcess
                       #, 'concrete' : True
                       }
     __table_args__ = (sqlalchemy.schema.ForeignKeyConstraint([name, taskID],
                                                              [Process.name, Process.taskID]),
                       {})
+
+    @sqlalchemy.ext.hybrid.hybrid_property
+    def progress(self):
+        """
+        Computes the overall progress estimate for the array by summing up
+        the maximum "progress" values for individual jobs.
+        An interesting, but frequent usecase, see for reference:
+            https://stackoverflow.com/questions/45775724/sqlalchemy-group-by-and-return-max-date
+        """
+        L, S = logging.getLogger(__name__), db.session
+        subq = S.query( Event.taskID, Event.procID
+                      , Event.procNumInArray
+                      , sqlalchemy.func.max(Event.progress).label('maxprogr')
+                      ).filter( and_( Event.taskID == self.taskID
+                                    , Event.procID == self.name )
+                                    ) \
+                       .group_by(Event.procNumInArray)
+        # NOTE: the above subquery may be useful base to see per-job-in-array
+        # progress summary, e.g.:
+        #for r in subq:  print(r)
+        return S.query(sqlalchemy.func.sum(subq.subquery().c.maxprogr)).scalar()
 
     #@sqlalchemy.ext.hybrid.hybrid_method
     #def events_of_job(self, jobNum):
@@ -166,6 +206,7 @@ class Array(Process):
     #            where(Event.taskID == cls.taskID).
     #            label("events_of_class")
     #            )
+
 
 class Event(db.Model):
     """
@@ -185,8 +226,10 @@ class Event(db.Model):
     sentAt = db.Column(db.DateTime)
     # Event recieved time
     recievedAt = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    # Event content (if any)
-    payload = db.Column(db.String)  # TODO: db.Column(db.JSON) ?
+    # Arbitrary event content
+    payload = db.Column(db.String)
+    # Incremental progress value brought by event
+    progress = db.Column(db.Integer, default=0)
     # Event class string
     eventClass = db.Column(db.String)
     # Host self-identification (hostname, no reverse DNS lookup)

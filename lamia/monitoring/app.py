@@ -87,6 +87,7 @@ if "__main__" == __name__:
     with open(inputFileName) as f:
         cfg_ = yaml.load(f, Loader=yaml.FullLoader)
     cfgMode = os.environ.get('FLASK_ENV', 'PRODUCTION')
+    print("Starting Lamia monitoring server in mode: %s"%cfgMode)  # XXX
     cfg = cfg_[cfgMode]
     backendStr = cfg.get( 'backend', 'waitress' )
     if 'waitress' == backendStr:
