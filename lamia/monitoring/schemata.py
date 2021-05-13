@@ -51,9 +51,11 @@ import lamia.monitoring.app
 
 ma = Marshmallow(app)
 
-class BaseSchema(ma.ModelSchema):
+class BaseSchema(ma.SQLAlchemyAutoSchema):  # before marshmallow 0.12 it was ModelSchema
     class Meta:
         sqla_session = db.session
+        load_instance = True
+        include_relationships = True
 
 class MetaSchema(marshmallow.Schema):
     """
@@ -76,6 +78,7 @@ class MetaSchema(marshmallow.Schema):
 
 class ProcessSchema(BaseSchema):
     lastEventClass = marshmallow.fields.Str(dump_only=True)
+    progress = marshmallow.fields.Int(dump_only=True)
 
     class Meta(BaseSchema.Meta):
         model = Process
@@ -86,6 +89,9 @@ class ProcessSchema(BaseSchema):
     )
 
 class ArraySchema(BaseSchema):
+    lastEventClass = marshmallow.fields.Str(dump_only=True)
+    progress = marshmallow.fields.Int(dump_only=True)
+
     class Meta(BaseSchema.Meta):
         model = Array
         exclude=('events',)
@@ -103,7 +109,7 @@ class PolymorphicProcessSchema(OneOfSchema):
         elif isinstance( obj, Process ):
             return "solitary"
         else:
-            assert(False)
+            assert(False)  # unknown process subtype
 
 class TaskSchema(BaseSchema):
     processes = marshmallow.fields.Nested( PolymorphicProcessSchema, many=True )

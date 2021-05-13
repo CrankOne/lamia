@@ -111,8 +111,8 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
         return r
 
     def _mk_subm_classAd( self, nProcs, cad, submissionTag=None
-            , jobName=None  # used only if monitor isn't None
-            , monitor=None ):
+            , jobName=None  # used only if monitoringAPI isn't None
+            , monitoringAPI=None ):
         L = logging.getLogger(__name__)
         # NOTE: the native `classad' module's instances seems to be pretty
         # useless due to their rudimentary serialization mechanism. Writing the
@@ -153,11 +153,12 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
             cad['environment'] = {}
         cad['environment']['HTCONDOR_JOBINDEX'] = '$(Process)' \
                                             if self.nProcs else 'SINGLE'
-        if monitor:
+        # Append environment with event URI variable.
+        if monitoringAPI:
             if 'JOB_EVENT_ADDR' in cad:
                 L.error( "The `JOB_EVENT_ADDR' specified for the environment"
                         " will be overriden." )
-            cad['environment']['JOB_EVENT_ADDR'] = monitor.job_event_address( jobName
+            cad['environment']['JOB_EVENT_ADDR'] = monitoringAPI.job_event_address( jobName
                     , '$(Process)' if self.nProcs else None )
         if len(self.tCmd) > 1:
             if not self.isImplicitArray:
@@ -213,7 +214,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 , submissionTag=None
                 , backendArguments={}
                 , popenKwargs={}
-                , monitor=None ):
+                , monitoringAPI=None ):
         L = logging.getLogger(__name__)
         self.condorSubmitExec = cfg['execs.condorSubmit']
         self.condorSubmitArgs = copy.deepcopy(cfg['condorSubmit'])
@@ -231,10 +232,9 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 'output' : stdout.format(**self.macros()),
                 'error' : stderr.format(**self.macros()),
             })
-        # TODO: inject environemnt variabl for monitoring
         self.submissionFilePath = self._mk_subm_classAd( nProcs, baseAd
                 , submissionTag=submissionTag
-                , monitor=monitor
+                , monitoringAPI=monitoringAPI
                 , jobName=jobName )
         self.cmd = [ cfg['execs.condorSubmit'], self.submissionFilePath
                , '-terse'
@@ -296,8 +296,8 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             L.warning('Job submission have no "userLog" attribute.')
         return ret
 
-    def __init__(self, config, monitor=None):
-        super().__init__(config, monitor=monitor)
+    def __init__(self, config, monitoringAPI=None):
+        super().__init__(config, monitoringAPI=monitoringAPI)
 
     def queue(self, jobName, **kwargs):
         """
@@ -310,7 +310,7 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         filename to which we append a `.sub' postfix and use resulting path for
         generating a submission file.
         """
-        return HTCondorShellSubmission( jobName, self.cfg, monitor=self.monitor, **kwargs )
+        return HTCondorShellSubmission( jobName, self.cfg, monitoringAPI=self.monitoringAPI, **kwargs )
 
     def dispatch_jobs(self, js, DAGFilePath=None):
         L = logging.getLogger(__name__)
@@ -319,8 +319,8 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
                 # Trivial case -- no dependencies => no additional operations
                 # needed, straigtforward submission.
                 rs = self._submit( js )
-                if self.monitor:
-                    self.monitor.follow_task(js)
+                if self.monitoringAPI:
+                    self.monitoringAPI.follow_task(js)
                 return rs
             js = [js]
         # Hereafter use networkx to build the DAG (which then will be rendered
@@ -361,12 +361,14 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         # experimental: we write pickled representation of the dependency
         # graph and encode it into base64 to be then sent to the monitoring
         # server:
-        #dgpckl = io.BytesIO()
-        #networkx.write_gpickle(G, dgpckl)
-        ##pickle.dump( G, dgpckl )
-        #with open( './xxx.base64', 'w' ) as f:
-        #    f.write(base64.b64encode(bz2.compress(dgpckl.getvalue())).decode())
-        #assert(False)  # XXX
+        #if self.monitoringAPI:
+        #    dgpckl = io.BytesIO()
+        #    networkx.write_gpickle(G, dgpckl)
+        #    ##pickle.dump( G, dgpckl )
+        #    #with open( './xxx.base64', 'w' ) as f:
+        #    #    f.write(base64.b64encode(bz2.compress(dgpckl.getvalue())).decode())
+        #    #assert(False)  # XXX
+        #    self.monitoringAPI[''] = ...
         # _________
         with open(DAGFilePath, 'w') as f:
             f.write(dagf.getvalue())
@@ -385,8 +387,8 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
             if err:
                 L.warning("`%s' stderr message(s):\n%s"%(
                     ' '.join(sCmd), err.decode()))
-            if self.monitor:
-                self.monitor.follow_task(js)
+            if self.monitoringAPI:
+                self.monitoringAPI.follow_task(js)
         ret = { 'out' : [] }
         for m in rxHTCondorDAGOutParLine.finditer( out.decode() ):
             ret['out'].append( m.groupdict() )

@@ -51,18 +51,18 @@ class Processes(flask_restful.Resource):
                 https://stackoverflow.com/questions/40524749/sqlalchemy-query-filter-on-child-attribute
         Supported additional query args:
             `hasEventsOfClass=<CLASSNAME>' -- if process name is set to `@all',
-            filters processes by presense of certain event (STARTED or FINISHED
+            filters processes by presense of certain event (START or DONE
             may be useful).
         """
         L, S = logging.getLogger(__name__), db.session
         Ps = with_polymorphic( models.Process, [models.Array,] )
         #
-        isArray = flask.request.args.get('isArray', False)
+        #asArray = flask.request.args.get('asArray', False)
         hasEventsOfClass = flask.request.args.get('hasEventsOfClass', None)
         #
         if '@all' != processName:
             j = S.query(Ps).filter_by( taskID=taskName, name=processName ).one()
-            print('xxx', j.lastEventClass)  # XXX
+            #print('xxx', j.lastEventClass)  # XXX
             return schemata.polyProcessSchema.dump(j), 200
         # Build up a query
         q = S.query(Ps)

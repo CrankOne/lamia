@@ -85,8 +85,9 @@ def create_app(cfg=None):
 if "__main__" == __name__:
     inputFileName = sys.argv[1] if len(sys.argv) > 1 else 'assets/configs/rest-srv.yaml'
     with open(inputFileName) as f:
-        cfg_ = yaml.load(f)
+        cfg_ = yaml.load(f, Loader=yaml.FullLoader)
     cfgMode = os.environ.get('FLASK_ENV', 'PRODUCTION')
+    print("Starting Lamia monitoring server in mode: %s"%cfgMode)  # XXX
     cfg = cfg_[cfgMode]
     backendStr = cfg.get( 'backend', 'waitress' )
     if 'waitress' == backendStr:

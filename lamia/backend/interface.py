@@ -205,7 +205,7 @@ class BatchBackend(abc.ABC):
     instance of arbitrary type that must be returned by submit() and understood
     by kill.../wait.../get_status/.../etc. methods.
     """
-    def __init__( self, config, monitor=None ):
+    def __init__( self, config, monitoringAPI=None ):
         """
         Ctr accepts a config object of form sutable for
         lamia.core.configuration.Configuration instance.
@@ -213,7 +213,7 @@ class BatchBackend(abc.ABC):
         L = logging.getLogger(__name__)
         self.cfg = lamia.core.configuration.Stack()
         self.cfg.push(lamia.core.configuration.Configuration(config))
-        self.monitor = monitor
+        self.monitoringAPI = monitoringAPI
 
     @property
     @abc.abstractmethod
@@ -369,6 +369,10 @@ gCommonParameters = {
     'monitoring_addr' : {
         'help' : "URL of monitoring service."
     },
+    'comment,m' : {
+        'help' : "A comment to descibe a task for humans"
+                 " (used by monitoring service only)."
+    },
     'monitoring_tag' : {
         'help' : "Adds a tag for task object taken into account by monitoring"
             " service that further helps to sort out various tasks.",
@@ -413,15 +417,6 @@ class BatchTask( lamia.core.task.Task
     """
     __commonParameters = gCommonParameters
 
-    def setup_monitoring( self, monitoringAddr, **kwargs ):
-        L = logging.getLogger(__name__)
-        self._monitoringAPI = \
-            lamia.monitoring.client.setup_monitoring_on_dest( monitoringAddr, **kwargs )
-        if not self.monitor:
-            L.warning('Remote Lamia monitoring is disabled (%s).'%(
-                'no host specified' if not monitoringAddr else \
-                        'failed to initialize client API' ))
-
     def setup_backend( self, backend
                            , backendConfig=None ):
         """
@@ -431,10 +426,7 @@ class BatchTask( lamia.core.task.Task
         """
         self._backend = instantiate_backend( backend
                                            , backendConfig
-                                           , monitor=self.monitor )
-
-    #def run(self, *args, **kwargs):
-    #    super().run(*args, **kwargs)
+                                           , monitoringAPI=self.monitoringAPI )
 
     @property
     def backend(self):
@@ -443,16 +435,11 @@ class BatchTask( lamia.core.task.Task
                     ' Use setup_backend() method to instantiate one.')
         return self._backend
 
-    @property
-    def monitor(self):
-        if not hasattr(self, '_monitoringAPI'):
-            raise RuntimeError('Monitoring API is not (yet) initialized.' )
-        return self._monitoringAPI
-
 class BatchSubmittingTask( BatchTask
                          , metaclass=lamia.core.task.TaskClass ):
     """
     Implements job-submitting action, utilizing certain back-end.
+    Provides integration with monitoring facility, if needed.
     """
     __execParameters = {
         'result_format,f' : {
@@ -501,6 +488,43 @@ class BatchSubmittingTask( BatchTask
         sys.stdout.write( resultFormat.format(**r.fields) )
         # TODO: notify monitoring service that task was submitted?
         return 0
+
+    def setup_monitoring( self, monitoringAddr, **kwargs):
+        """
+        Tries to instantiate a monitoring API. Usually, called automatically
+        by lamia.core.task.Task.run(). The `kwargs' will be forwarded as is
+        to lamia.monitoring.client.setup_monitoring_on_dest().
+        """
+        L = logging.getLogger(__name__)
+        self._monitoringAPI = \
+            lamia.monitoring.client.setup_monitoring_on_dest( monitoringAddr
+                , **kwargs )
+        if not self.monitoringAPI:
+            L.warning('Remote Lamia monitoring is disabled (%s).'%(
+                'no host specified' if not monitoringAddr else \
+                        'failed to initialize client API' ))
+
+    @property
+    def monitoringAPI(self):
+        if not hasattr(self, '_monitoringAPI'):
+            raise RuntimeError('Monitoring API is not (yet) initialized.' )
+        return self._monitoringAPI
+
+
+    def set_monit_task_name(self, name):
+        L = logging.getLogger(__name__)
+        if not self.monitoringAPI:
+            return
+        try:
+            self.monitoringAPI.set_task_name(name)
+            L.info( 'Monitoring task name has been set to "%s"'%name )
+        except KeyError as e:
+            # kind of expected: human users been seen running eponymous tasks
+            ntid = name + '-' + na58.ttag.new_ttag()
+            self.monitoringAPI.set_task_name(ntid)
+            L.info( 'Monitoring task name has been set to "%s" as "%s"'
+                    ' already exists'%(ntid, name) )
+
 
 class BatchListingTask( BatchTask
                       , metaclass=lamia.core.task.TaskClass ):

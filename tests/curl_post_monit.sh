@@ -1,12 +1,16 @@
 # Testing script that implements a common scenario of batch task with several
 # jobs and arrays defined.
 
-HOST=http://localhost:5000
+#HOST=http://localhost:5000
+HOST=http://na58-dev:8088
 
 TASK_LABEL=testing-$(printf '%x' $(date +%s))
 BASE_URL=$HOST/api/v0/$TASK_LABEL
 
 echo "Base URL: ${BASE_URL}"
+
+# TODO: add support for "tags" in task
+#"tags" : ["testing", "one", "two"],
 
 echo "CREATING A TASK"
 curl --header 'Content-Type: application/json' \
@@ -54,7 +58,7 @@ curl --header 'Content-Type: application/json' \
   -w '%{http_code}\n' <<-EOF
 	{
 	    "eventClass" : "STARTED",
-        "payload" : "arbitrary data here",
+	    "payload" : "arbitrary data here",
 	    "_meta" : {
 	        "host" : "$(hostname)",
 	        "time" : "$(date -u +%s.%N)"
@@ -68,7 +72,7 @@ curl --header 'Content-Type: application/json' \
   -w '%{http_code}\n' <<-EOF
 	{
 	    "eventClass" : "STARTED",
-        "payload" : "{\"progress\" : 90}",
+	    "payload" : "{\"progress\" : 90}",
 	    "_meta" : {
 	        "host" : "$(hostname)",
 	        "time" : "$(date -u +%s.%N)"
@@ -82,7 +86,7 @@ curl --header 'Content-Type: application/json' \
   -w '%{http_code}\n' <<-EOF
 	{
 	    "eventClass" : "STARTED",
-        "payload" : "arbitrary data here",
+	    "payload" : "arbitrary data here",
 	    "_meta" : {
 	        "host" : "$(hostname)",
 	        "time" : "$(date -u +%s.%N)"
@@ -96,7 +100,7 @@ curl --header 'Content-Type: application/json' \
   -w '%{http_code}\n' <<-EOF
 	{
 	    "eventClass" : "FINISHED",
-        "payload" : "arbitrary data here",
+	    "payload" : "arbitrary data here",
 	    "_meta" : {
 	        "host" : "$(hostname)",
 	        "time" : "$(date -u +%s.%N)"

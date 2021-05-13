@@ -62,6 +62,7 @@ class Tasks(flask_restful.Resource):
         # XXX
         #print ('Transient: %s, Pending %s, Detached: %s, Persistent: %s' % (
         #        state.transient, state.pending, state.detached, state.persistent))
+        L.debug(f'POST: taskName={t.name} from {flask.request.remote_addr}')
         with S.no_autoflush:
             if S.query(models.Task).filter_by( name=t.name ).first() is not None:
                 resp['errors'] = [{ 'reason' : 'Task name is not unique.'
@@ -88,8 +89,11 @@ class Tasks(flask_restful.Resource):
 
     def get(self, name=None):
         L, S = logging.getLogger(__name__), db.session
+        L.debug(f'GET: taskName={name} from {flask.request.remote_addr}')
         if name:
-            t = S.query(models.Task).filter_by(name=name).one()
+            t = S.query(models.Task).filter_by(name=name).one_or_none()
+            if t is None:
+                return {'error': f'No task named {name} exists.'}, 404
             return schemata.taskSchema.dump(t)
         q = S.query(models.Task)
         # Otherwise, perform more complex query, if needed
@@ -105,6 +109,7 @@ class Tasks(flask_restful.Resource):
         Perform deletion of particular task or all the task indexed in table.
         """
         L, S = logging.getLogger(__name__), db.session
+        L.debug(f'DELETE: taskName={name} from {flask.request.remote_addr}')
         if name is None:
             return { 'error' : 'By security reasons, batch deletion of task '
                                'is forbidden.'

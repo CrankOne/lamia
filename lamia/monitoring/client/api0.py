@@ -28,6 +28,7 @@ import os.path
 import urllib.request
 import http.client
 import requests
+import logging
 import functools, io, base64, pickle, bz2, json, networkx, socket, time
 
 class LamiaMonitoringAPI(object):
@@ -37,8 +38,9 @@ class LamiaMonitoringAPI(object):
 
     def __init__(self, path):
         self._path = path
-        self._taskName = None
-        self.taskPayload = {}
+        # This properties will be sent as task payload
+        self.taskName = None
+        self._taskPayload = {}
 
     @property
     def hostURL(self):
@@ -70,9 +72,28 @@ class LamiaMonitoringAPI(object):
             # brought by response
         self._taskName = taskName
 
-    def set_configs(self, *args, **kwargs):
-        # TODO
-        pass
+    def __setitem__(self, label, value):
+        """
+        Call this method to set the supplementary task information: task
+        configuration to store, the tags list, username, comment, notification
+        e-mail address, etc.
+        """
+        if label not in set(('username', 'config', 'tags'
+                           , 'emailNotify', 'comment')):
+            L.warning(f'Refusing to set "{label}" property of task payload'
+                ' monitoring message.')
+            return False
+        if label in ('username', 'emailNotify', 'comment'):
+            assert type(value) is str
+        elif 'tags' == label:
+            assert  type(value) in (list, tuple)
+            assert all( type(t) is str for t in value )
+        elif 'config':
+            assert type(value) in (str, dict, tuple, list)
+        else:
+            assert False
+        self._taskPayload[label] = value
+        return True
 
     def job_event_address(self, processName, arrayNum=None):
         """
@@ -80,19 +101,24 @@ class LamiaMonitoringAPI(object):
         """
         p = os.path.join(self.get_task_URI_base(), processName)
         if arrayNum is not None:
-            p += '?arrayIndex=%s'%str(arrayNum)
+            p += '/event?arrayIndex=%s'%str(arrayNum)
         return p
 
     def get_task_URI_base(self, taskName=None):
+        """
+        Returns base task URI. If taskName kwarg is given, the rendered path
+        is for task name provided, otherwise own task name is used.
+        """
         if not taskName:
+            assert(self._taskName)
             taskName = self._taskName
         return '{baseURL}/{taskName}'.format(baseURL=self.hostURL, taskName=taskName)
 
     def follow_task(self, js):
         """
         Recieves the `lamia.core.backend.interface.Submission' subclass
-        instance to form the POST request for the monitoring server imposing
-        particular new task information.
+        instance to form and submit the POST request for the monitoring server.
+        The POST request imposes new task information.
         """
         g = None
         if type(js) in (list, tuple) or js.dependencies:
@@ -104,6 +130,11 @@ class LamiaMonitoringAPI(object):
             dgpckl = io.BytesIO()
             networkx.write_gpickle(g, dgpckl)
             g = base64.b64encode(bz2.compress(dgpckl.getvalue())).decode()
+        else:
+            dgpckl = io.BytesIO()
+            networkx.write_gpickle(js.depGraph, dgpckl)
+            g = base64.b64encode(bz2.compress(dgpckl.getvalue())).decode()
+        # request data dict, to be updated with "task payload" dict
         rqData = { '_meta' : { 'host' : socket.gethostname()
                              , 'time' : str(time.time()) }
                  # Set by caller
@@ -132,7 +163,12 @@ class LamiaMonitoringAPI(object):
                     rqData['processes'][j.jobName] = None
                 _collect_deps( j.dependencies )
         _collect_deps( js )
-        rqData.update(self.taskPayload)
+        # update the request data with "task payload"
+        rqData.update(self._taskPayload)
+        if 'config' in rqData and rqData['config']:
+            if rqData['config']:
+                rqData['config'] = base64.b64encode(bz2.compress(pickle.dumps(rqData['config']))).decode()
+            #rqData['config'] = json.dumps(rqData['config'], default=str)
         #
         #print( 'data to sent:', json.dumps(rqData, sort_keys=True, indent=2) )  # XXX
         #print('xxx', self.get_task_URI_base())
@@ -144,8 +180,13 @@ class LamiaMonitoringAPI(object):
         #req.add_header('Content-Length', len(jsondataasbytes))
         #response = urllib.request.urlopen(req, jsondataasbytes)
         #print(response)
+        # Send the request
         r = requests.post( self.get_task_URI_base()
-                         , json=json.dumps(rqData, default=str)
+                         , json=rqData
+                         #, headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+                         # ^^^ weirdly, the `requests' does not always has
+                         # JSON mimetype...
                          )
+        # TODO: do something with the response data ...
         print( r.status_code, r.json() )
 
