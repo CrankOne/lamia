@@ -45,7 +45,7 @@ curl --header 'Content-Type: application/json' \
 
 echo "RETRIEVING AN ARRAY JOB INFO"
 curl --header 'Content-Type: application/json' \
-  --request GET "$BASE_URL/tstArray2?isArray=true" \
+  --request GET "$BASE_URL/tstArray2?asArray=true" \
   -w '%{http_code}\n'
 
 echo "COMMITING A 'STARTED' EVENT"

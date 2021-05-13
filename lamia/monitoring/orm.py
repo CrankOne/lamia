@@ -170,11 +170,11 @@ class Array(Process):
 class Event(db.Model):
     """
     Reflects the process' event. May be one of the following types:
-        - Submitted: corresponds to process being sent to the computational
+        - SUBMITTED: corresponds to process being sent to the computational
         back-end (HTCondor, LSF, etc). May not be created (?).
-        - Started: process started computation
-        - Beat: process notifies us that it is still running
-        - Terminated: process done its job (successfully or not)
+        - STARTED: process started computation
+        - READY/PROGRESS/BEAT: process notifies us that it is still running
+        - DONE/TERMINATED/FAILED: process done its job (successfully or not)
     Events may bear some arbitrary payload for custom usage.
     The submitted/started event carries only the timestamp.
     """
