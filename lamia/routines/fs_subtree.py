@@ -169,11 +169,11 @@ def contxtual_path( fstruct, env, base=None ):
                 # or list of strings
                 if type(r) is str:
                     r = os.path.abspath( r if base is None else os.path.join( base, r ) )
-                elif type(pt) is list:
+                elif type(r) is list:
                     r = [ os.path.abspath( rr if base is None else os.path.join(base, rr) ) for rr in r ]
                 else:
                     raise ValueError( "Unable to get abspath from %s type "
-                        " instance."%type(pt).__name__ )
+                        " instance."%type(r).__name__ )
             else:
                 # Reflexive mode: the auto_path() returns either tuple
                 # (string, dict) or list of tuples [(string, dict) ...]

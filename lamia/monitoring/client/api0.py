@@ -153,7 +153,7 @@ class LamiaMonitoringAPI(object):
         def _collect_deps( ps ):
             for j in ps if type(ps) in (tuple, list) else (ps,):
                 if 1 != j.nProcs or j.isImplicitArray:
-                    assert( j.jobName not in rqData['processes'] )
+                    assert( j.jobName not in rqData['processes'] )  # duplicating job name found in dependencies
                     if not j.minSuccess:
                         rqData['processes'][j.jobName] = j.nProcs*j.nImplicitJobs
                     else:

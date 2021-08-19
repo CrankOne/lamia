@@ -37,7 +37,7 @@ evaluation of corresponding routine.
 """
 import sys, argparse, logging, types, functools
 import inflection
-import lamia.logging
+import lamia.logging, lamia.backend
 
 def _argparse_par(s):
     """
@@ -154,6 +154,7 @@ class Task(object):
             3. parameters supplied by command line
         In case of lists, the values will be stacked up.
         """
+        import lamia.backend.interface
         L = logging.getLogger()
         if not (hasattr(self, '_main') and self._main):
             L.error( 'Entry point is not defined by task instance.' )
