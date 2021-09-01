@@ -12,7 +12,7 @@ enough to integrate with existing batch-scheduling solutions (like
 [Azkaban](http://data.linkedin.com/opensource/azkaban)). This projects
 were designed to simplify the scheduling and their focus lies on the
 conditioning of the workflow dependencies rather then configuration of each
-particulat job. At the same time systems like [PanDA](pandawms.org) and
+particular job. At the same time systems like [PanDA](pandawms.org) and
 [Pegasus WMS](https://pegasus.isi.edu/) appears to be a way overencumbered and
 too complicated for fast prototyping purposes.
 
