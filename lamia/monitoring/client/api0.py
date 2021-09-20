@@ -37,10 +37,12 @@ class LamiaMonitoringAPI(object):
     """
 
     def __init__(self, path):
+        L = logging.getLogger(__name__)
         self._path = path
         # This properties will be sent as task payload
         self.taskName = None
         self._taskPayload = {}
+        L.debug( 'Monitoring client api of version 0 instantiated.' )
 
     @property
     def hostURL(self):
@@ -52,8 +54,10 @@ class LamiaMonitoringAPI(object):
         """
         Called after particular API instantiated.
         """
+        L = logging.getLogger(__name__)
         self._dest = (hostname, port if port else 80)
         self.payload = {}
+        L.debug( f'Monitor host set to "{hostname}", port={port}.' )
 
     def set_task_name(self, taskName):
         """
@@ -61,10 +65,13 @@ class LamiaMonitoringAPI(object):
         any communication. May raise `KeyError' if task with given `taskName'
         exists -- users code must treat this case carefully.
         """
+        L = logging.getLogger(__name__)
         conn = http.client.HTTPConnection('%s:%d'%self._dest)
-        conn.request( "GET", os.path.join( self._path, taskName ) )
+        taskPath = os.path.join( self._path, taskName )
+        conn.request( "GET", taskPath )
         r = conn.getresponse()
         conn.close()
+        L.debug(f'GET:{taskPath} returned: {r.status}')
         if 404 != r.status:
             raise KeyError( 'Task with name "%s" is already listed'
                     ' by monitoring service.'%(taskName) )
@@ -120,6 +127,7 @@ class LamiaMonitoringAPI(object):
         instance to form and submit the POST request for the monitoring server.
         The POST request imposes new task information.
         """
+        L = logging.getLogger(__name__)
         g = None
         if type(js) in (list, tuple) or js.dependencies:
             # build the deps graph
@@ -150,19 +158,30 @@ class LamiaMonitoringAPI(object):
         }
         # Recursively traverse job deps, acquiring all the processes --
         # standalone and arrays
-        def _collect_deps( ps ):
+        def _collect_deps( ps, stack ):
             for j in ps if type(ps) in (tuple, list) else (ps,):
-                if 1 != j.nProcs or j.isImplicitArray:
-                    assert( j.jobName not in rqData['processes'] )  # duplicating job name found in dependencies
-                    if not j.minSuccess:
-                        rqData['processes'][j.jobName] = j.nProcs*j.nImplicitJobs
+                jobID = (j.jobName, id(j))
+                skip = jobID in stack
+                L.debug( ('Skipping' if skip else 'Adding')
+                        + ' job (' + str(j) 
+                        + ') to the list of processes to be monitored: "'
+                        + j.jobName
+                        + f'":[nProcs={j.nProcs}, isImplicitArray={j.isImplicitArray})] '
+                        + ( '<- ' if stack else '(no deps)' )
+                        + ' <- '.join([jj[0] for jj in stack]) )
+                if not skip:
+                    if 1 != j.nProcs or j.isImplicitArray:
+                        if j.jobName in [jj[0] for jj in stack]:
+                            raise KeyError( j.jobName )  # duplicating job name found in dependencies
+                        if not j.minSuccess:
+                            rqData['processes'][j.jobName] = j.nProcs*j.nImplicitJobs
+                        else:
+                            rqData['processes'][j.jobName] = [ j.nProcs*j.nImplicitJobs
+                                                             , j.minSuccess*j.nImplicitJobs ]
                     else:
-                        rqData['processes'][j.jobName] = [ j.nProcs*j.nImplicitJobs
-                                                         , j.minSuccess*j.nImplicitJobs ]
-                else:
-                    rqData['processes'][j.jobName] = None
-                _collect_deps( j.dependencies )
-        _collect_deps( js )
+                        rqData['processes'][j.jobName] = None
+                _collect_deps( j.dependencies, [jobID] + stack )
+        _collect_deps( js, [] )
         # update the request data with "task payload"
         rqData.update(self._taskPayload)
         if 'config' in rqData and rqData['config']:

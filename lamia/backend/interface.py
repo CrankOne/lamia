@@ -19,7 +19,9 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import abc, os, logging, sys, copy, argparse, re, enum, itertools, networkx
+import abc, os, logging, sys, copy, argparse, re, enum, itertools, networkx \
+     , string, random
+
 import lamia.core.configuration \
      , lamia.logging \
      , lamia.core.task \
@@ -514,13 +516,16 @@ class BatchSubmittingTask( BatchTask
     def set_monit_task_name(self, name):
         L = logging.getLogger(__name__)
         if not self.monitoringAPI:
+            L.debug('Monitoring API registering skipped as no instance set.')
             return
         try:
             self.monitoringAPI.set_task_name(name)
             L.info( 'Monitoring task name has been set to "%s"'%name )
         except KeyError as e:
             # kind of expected: human users been seen running eponymous tasks
-            ntid = name + '-' + na58.ttag.new_ttag()
+            ntid = name + '-' \
+                    + ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(4))
+            # ^^^ TODO: above is not guaranteed to have no collisions
             self.monitoringAPI.set_task_name(ntid)
             L.info( 'Monitoring task name has been set to "%s" as "%s"'
                     ' already exists'%(ntid, name) )
