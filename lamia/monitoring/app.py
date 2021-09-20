@@ -37,7 +37,7 @@ def create_app(cfg=None):
     # Instantiate application
     app = flask.Flask(__name__)
     # Enable COR
-    if cfg.get('enableCOR', False):
+    if cfg.get('enableCOR', True):  # TODO: False
         # Add
         #   "Access-Control-Allow-Origin" : "*", 
         #   "Access-Control-Allow-Credentials" : true 

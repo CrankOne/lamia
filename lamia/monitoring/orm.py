@@ -40,7 +40,10 @@ from sqlalchemy.ext.associationproxy import association_proxy
 import sqlalchemy.ext.hybrid
 from sqlalchemy.ext.declarative import DeclarativeMeta
 
-db = flask_sqlalchemy.SQLAlchemy()
+# https://stackoverflow.com/a/58697109/1734499
+db = flask_sqlalchemy.SQLAlchemy(
+            engine_options={ 'connect_args': { 'timeout': 8 }}
+        )
 
 # Table maintainging task-to-tags relationship (many to many).
 # TODO: auto-delete tag(s) being no more associated with any task.

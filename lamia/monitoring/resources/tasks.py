@@ -27,6 +27,7 @@ No HATEOAS currently implemented.
 
 import flask_restful
 import sqlalchemy
+import sqlalchemy.orm
 import lamia.monitoring.orm as models
 import flask, logging, json
 import lamia.monitoring.app
@@ -88,21 +89,59 @@ class Tasks(flask_restful.Resource):
         return resp, 201  # created
 
     def get(self, name=None):
+        """
+        Returns list of the active tasks. 
+        """
         L, S = logging.getLogger(__name__), db.session
         L.debug(f'GET: taskName={name} from {flask.request.remote_addr}')
         if name:
+            # query string is empty, perform standard query
             t = S.query(models.Task).filter_by(name=name).one_or_none()
             if t is None:
                 return {'error': f'No task named {name} exists.'}, 404
             return schemata.taskSchema.dump(t)
+        qp = {}
+        if flask.request.args:
+            rqa = flask.request.args.to_dict()
+            print('>>>', rqa)
+            s = schemata.TasksQuerySchema()
+            errors = s.validate(rqa)
+            if errors:
+                return {'errors': errors}, 400
+            qp = s.load(flask.request.args)
+            print('<<<', qp)
+            #return 'ok'
         q = S.query(models.Task)
+        if 'tag' in qp:
+            q = q.filter(models.Taks.tags.any(models.Tag.name.in_(filterByTags)))
+        if 'fields' in qp:
+            q = q.options(sqlalchemy.orm.load_only(*qp['fields']))
+        if 'order' in qp:
+            orderBy = getattr(models.Task, qp['order']) 
+            if 'sort' in qp:
+                if qp['sort'] == 'asc':
+                    #q = q.order_by(f"{qp['order']} asc")
+                    q = q.order_by(orderBy.asc())
+                elif qp['sort'] == 'desc':  #< todo?
+                    #q = q.order_by(f"{qp['order']} desc")
+                    q = q.order_by(orderBy.desc())
+                else:
+                    return {'errors': f"`sort' is \"{qp['sort']}\" (`desc', `asc' are only allowed)."}
+            else:
+                #q = q.order_by(f"{qp['order']} asc")
+                q = q.order_by(orderBy.desc())
+            #q.order_by()
         # Otherwise, perform more complex query, if needed
-        filterByTags=flask.request.args.getlist('tag')
-        if filterByTags:
-            q = q.filter(models.Task.tags.any(models.Tag.name.in_(filterByTags)))
+        # TODO: manual query string retrieval is discouraged by flask_restful
         # TODO: submission/finished/whatever dates
-        ts = q.all()
-        return schemata.tasksSchema.dump(ts)
+        #ts = q.all()
+        if 'limit' in qp:
+            q = q.limit(qp['limit'])
+        if 'offset' in qp:
+            q = q.offset(qp['offset'])
+        s = schemata.TaskSchema(many=True, only=None if 'fields' not in qp else qp['fields'])
+        return s.dump(q.all())
+        #return schemata.tasksSchema.dump(ts)
 
     def delete(self, name=None):
         """
@@ -119,3 +158,4 @@ class Tasks(flask_restful.Resource):
             S.delete(t)
             S.commit()
             return { 'deleted' : 1 }, 200
+

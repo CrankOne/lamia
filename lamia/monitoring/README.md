@@ -83,11 +83,55 @@ To check basic communication using `curl` do:
 
 console log will depict basic ideas behind the interaction with API.
 
-## Running on production server
+## Running on Servers
 
 Proposed approach to run Lamia monitoring server is to use Waitress here.
 To accomplish running on production, consider the following stages on
 RHEL-family distro:
+
+### Testing
+
+1. Make a directory for the Lamia monitoring:
+
+    $ sudo mkdir -p /var/src/lamia.www
+    $ cd /var/src/lamia.www
+
+2. Deploy and activate Python virtual environment for the project:
+
+    $ python3 -m venv
+    $ source venv/bin/activate
+
+3. Fetch and install the Lamia sources into virtualenv:
+
+    $ git clone git@github.com:CrankOne/lamia.git lamia.src
+    $ pip install -e lamia.src
+
+4. Copy and edit the configuration file for the monitoring server:
+
+    # cp lamia.src/assets/configs/rest-srv.yaml .
+    # nano rest-srv.yaml
+
+5. Copy and edit the systemd's unit for the monitoring server:
+
+    # cp lamia.src/assets/configs/service /etc/systemd/system/lamia-monitoring.service
+    # nano /etc/systemd/system/lamia-monitoring.service
+
+6. Recache systmd units and start the Lamia monitoring servide:
+
+    # systemctl daemon-reload
+    # service lamia-monitoring start
+
+Check the unit's status with:
+
+    # systemctl status lamia-monitoring
+
+7. In case of troubles, the Lamia monitoring server's logs are available:
+
+    # joutnalctl -u lamia-monitoring
+    # journalctl _PID=2263  # (use pid provided by status)
+    # tail /var/log/lamia/error.log
+
+### Basic Idea for Production
 
 1. Make a virtual environment for the Lamia to run somewhere. Do not forget to
 provide the virtual environment or system python installation with modules

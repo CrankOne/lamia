@@ -39,6 +39,7 @@ import datetime
 import marshmallow
 import marshmallow.fields
 import flask_marshmallow.sqla
+import sqlalchemy.inspection
 from marshmallow_oneofschema import OneOfSchema
 from collections.abc import Iterable
 
@@ -111,6 +112,8 @@ class PolymorphicProcessSchema(OneOfSchema):
         else:
             assert(False)  # unknown process subtype
 
+
+
 class TaskSchema(BaseSchema):
     processes = marshmallow.fields.Nested( PolymorphicProcessSchema, many=True )
 
@@ -157,6 +160,42 @@ class TaskSchema(BaseSchema):
         , "collection" : ma.URLFor('tasks')
         },
     )
+
+class TasksQuerySchema(marshmallow.Schema):
+    """
+    A schema for querying tasks queries.
+    In principle could be superseded by `TaskSchema', however it is unclear
+    whether Marshmellow could support querystring extensions:
+        - https://stackoverflow.com/a/30779996/1734499
+        - https://stackoverflow.com/q/59186149/1734499
+        - finaly, gone for this: https://stackoverflow.com/a/54412410/1734499
+          (create a dedicated resource to query for tasks)
+    Supports following fields:
+        - fields -- list of strings refering ones from model
+        - tags -- list of strings
+        - offset, limit, order, sort -- query limiting arguments
+    """
+    fields = marshmallow.fields.List(marshmallow.fields.Str())
+    # ^^^ validate=validate.OneOf(['name', 'username', 'emailNotify'
+    #           , 'comment', 'submittedAt', 'submHostIP', 'hostname'
+    #           , 'depGraph', 'config', 'processes', 'tags' ])
+    # OR:
+    # [column.name for column in inspect(model).c]
+    tags = marshmallow.fields.List(marshmallow.fields.Str)
+    offset = marshmallow.fields.Int()
+    limit = marshmallow.fields.Int()
+    order = marshmallow.fields.Str()  # TODO: oneof
+    sort = marshmallow.fields.Str(validate=marshmallow.validate.OneOf(['asc', 'desc']))
+
+    @marshmallow.pre_load
+    def split_lists(self, inData_, **kwargs):
+        inData = dict(inData_)
+        if 'tag' in inData:
+            inData['tag'] = inData['tag'].split(',')
+        if 'fields' in inData:
+            inData['fields'] = inData['fields'].split(',')
+        return inData
+
 
 class EventSchema(BaseSchema):
     processRef = marshmallow.fields.Tuple([
