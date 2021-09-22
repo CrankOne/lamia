@@ -163,7 +163,7 @@ class TaskSchema(BaseSchema):
 
 class TasksQuerySchema(marshmallow.Schema):
     """
-    A schema for querying tasks queries.
+    A schema for querying tasks items.
     In principle could be superseded by `TaskSchema', however it is unclear
     whether Marshmellow could support querystring extensions:
         - https://stackoverflow.com/a/30779996/1734499
@@ -194,6 +194,11 @@ class TasksQuerySchema(marshmallow.Schema):
             inData['tag'] = inData['tag'].split(',')
         if 'fields' in inData:
             inData['fields'] = inData['fields'].split(',')
+            #inData['fields'] = list( f if f != 'tags' else 'tags.name' for f in inData['fields'] )
+        if 'offset' in inData:
+            inData['offset'] = int(inData['offset'])
+        if 'limit' in inData:
+            inData['limit'] = int(inData['limit'])
         return inData
 
 
@@ -220,6 +225,34 @@ class EventSchema(BaseSchema):
                     ' have "taskName" and "procName" keys.', '_preprocessing' )
         data['processRef'] = ( data.pop('taskName'), data.pop('procName') )
         return data
+
+class EventsQuerySchema(marshmallow.Schema):
+    """
+    A schema for querying event entries.
+    Supports following fields:
+        - fields -- list of strings refering ones from model
+        - offset, limit, order, sort -- query limiting arguments
+        - class, procNum, IP/host -- TODO
+    """
+    fields = marshmallow.fields.List(marshmallow.fields.Str())
+    arrayIndex = marshmallow.fields.Int()
+    offset = marshmallow.fields.Int()
+    limit = marshmallow.fields.Int()
+    order = marshmallow.fields.Str()  # TODO: oneof
+    sort = marshmallow.fields.Str(validate=marshmallow.validate.OneOf(['asc', 'desc']))
+
+    @marshmallow.pre_load
+    def split_lists(self, inData_, **kwargs):
+        inData = dict(inData_)
+        if 'fields' in inData:
+            inData['fields'] = inData['fields'].split(',')
+            #inData['fields'] = list( f if f != 'tags' else 'tags.name' for f in inData['fields'] )
+        if 'offset' in inData:
+            inData['offset'] = int(inData['offset'])
+        if 'limit' in inData:
+            inData['limit'] = int(inData['limit'])
+        return inData
+
 
 metaSchema = MetaSchema()
 taskSchema = TaskSchema()

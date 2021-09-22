@@ -33,6 +33,7 @@ from lamia.monitoring.resources import validate_input
 from lamia.monitoring.orm import db
 import flask, logging, json
 import lamia.monitoring.app
+import lamia.monitoring.utils
 import lamia.monitoring.schemata as schemata
 
 class Events(flask_restful.Resource):
@@ -43,18 +44,42 @@ class Events(flask_restful.Resource):
         Returns events list for certain process.
         """
         L, S = logging.getLogger(__name__), db.session
-        arrayIndex = flask.request.args.get('arrayIndex', None)
+        arrayIndex = None
+        if flask.request.args:
+            rqa = flask.request.args.to_dict()
+            s = schemata.EventsQuerySchema()
+            errors = s.validate(rqa)
+            L.debug('To be validated: ' + str(rqa))
+            if errors:
+                L.debug('Validation errors: ' + str(errors))
+                return {'errors': errors}, 400
+            qp = s.load(rqa)
+            arrayIndex = qp.get('arrayIndex', None)
+        else:
+            qp = {}
+            arrayIndex = None
+        #arrayIndex = flask.request.args.get('arrayIndex', None)
         # ... optional querying
         if arrayIndex is not None:
-            p = S.query(models.Array).filter_by( taskID=taskName
-                                               , name=procName ).one()
-            evs = S.query(models.Event).filter_by( process=p
-                                                 , procNumInArray=int(arrayIndex) ).all()
+            procQ = S.query(models.Array)
         else:
-            p = S.query(models.Process).filter_by( taskID=taskName
-                                                 , name=procName ).one()
-            evs = S.query(models.Event).filter_by( process=p ).all()
-        return schemata.eventSchema.dump(evs, many=True)
+            procQ = S.query(models.Process)
+        # Get the process/array instance
+        p = procQ.filter_by(taskID=taskName, name=procName).one_or_none()
+        if p is None:
+            L.debug(f'Process not found: taskName="{taskName}",'
+                    f' procName="{procName}", arrayIndex={arrayIndex}')
+            return {'errors': 'Process not found.'}, 404
+        q = S.query(models.Event)
+        if arrayIndex is None:
+            q = q.filter_by(process=p)
+        else:
+            q = q.filter_by(process=p, procNumInArray=int(arrayIndex))
+        if 'fields' in qp:
+            q = q.options(sqlalchemy.orm.load_only(*[f for f in qp['fields']]))
+        q, nTotal = lamia.monitoring.utils.apply_pagination(q, qp, models.Event)
+        return { 'entries': schemata.eventSchema.dump(q.all(), many=True)
+               , 'total': nTotal }
 
     def post( self, vd, _meta=None ):
         """
@@ -81,7 +106,7 @@ class Events(flask_restful.Resource):
             arrayIndex = int(arrayIndex)
             if arrayIndex > j.nJobs \
             or 0 > arrayIndex:
-                resp['errors'] = [{ 'reason' : 'Process index is not in range.'
+                resp['errors'] = [{ 'reason' : 'Process index is not within the range.'
                                   , 'details' : { 'index' : arrayIndex
                                                 , 'nJobs' : j.nJobs
                                                 }

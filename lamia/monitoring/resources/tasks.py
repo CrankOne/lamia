@@ -31,6 +31,7 @@ import sqlalchemy.orm
 import lamia.monitoring.orm as models
 import flask, logging, json
 import lamia.monitoring.app
+import lamia.monitoring.utils
 from lamia.monitoring.resources import validate_input
 import lamia.monitoring.schemata as schemata
 from lamia.monitoring.orm import db
@@ -103,45 +104,28 @@ class Tasks(flask_restful.Resource):
         qp = {}
         if flask.request.args:
             rqa = flask.request.args.to_dict()
-            print('>>>', rqa)
             s = schemata.TasksQuerySchema()
             errors = s.validate(rqa)
             if errors:
                 return {'errors': errors}, 400
-            qp = s.load(flask.request.args)
-            print('<<<', qp)
-            #return 'ok'
+            qp = s.load(rqa)  # ? was flask.request.args
         q = S.query(models.Task)
         if 'tag' in qp:
             q = q.filter(models.Taks.tags.any(models.Tag.name.in_(filterByTags)))
         if 'fields' in qp:
-            q = q.options(sqlalchemy.orm.load_only(*qp['fields']))
-        if 'order' in qp:
-            orderBy = getattr(models.Task, qp['order']) 
-            if 'sort' in qp:
-                if qp['sort'] == 'asc':
-                    #q = q.order_by(f"{qp['order']} asc")
-                    q = q.order_by(orderBy.asc())
-                elif qp['sort'] == 'desc':  #< todo?
-                    #q = q.order_by(f"{qp['order']} desc")
-                    q = q.order_by(orderBy.desc())
-                else:
-                    return {'errors': f"`sort' is \"{qp['sort']}\" (`desc', `asc' are only allowed)."}
-            else:
-                #q = q.order_by(f"{qp['order']} asc")
-                q = q.order_by(orderBy.desc())
-            #q.order_by()
+            # TODO: `processes' and `tags' must be treated in different way
+            # (relationships)
+            if 'tags' in qp:
+                q = q.options( sqlalchemy.orm.joinedload('tags').load_only('name') )
+            if 'processes' in qp:
+                #q = q.options()
+                pass
+            q = q.options(sqlalchemy.orm.load_only(*[f for f in qp['fields'] if f not in ['tags', 'processes'] ]))
+        q, nTotal = lamia.monitoring.utils.apply_pagination(q, qp, models.Task)
         # Otherwise, perform more complex query, if needed
-        # TODO: manual query string retrieval is discouraged by flask_restful
         # TODO: submission/finished/whatever dates
-        #ts = q.all()
-        if 'limit' in qp:
-            q = q.limit(qp['limit'])
-        if 'offset' in qp:
-            q = q.offset(qp['offset'])
         s = schemata.TaskSchema(many=True, only=None if 'fields' not in qp else qp['fields'])
-        return s.dump(q.all())
-        #return schemata.tasksSchema.dump(ts)
+        return {'entries': s.dump(q.all()), 'total': nTotal}
 
     def delete(self, name=None):
         """
