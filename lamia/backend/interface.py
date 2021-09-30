@@ -371,7 +371,7 @@ gCommonParameters = {
     'monitoring_addr' : {
         'help' : "URL of monitoring service."
     },
-    'comment,m' : {
+    'monitoring_comment,m' : {
         'help' : "A comment to descibe a task for humans"
                  " (used by monitoring service only)."
     },

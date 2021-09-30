@@ -144,7 +144,7 @@ class Loader(j2.BaseLoader):
         L = logging.getLogger(__name__)
         with open(fPath) as f:
             try:
-                content = yaml.load(f)
+                content = yaml.load(f, Loader=yaml.FullLoader)
                 mt = os.path.getmtime(fPath)
             except Exception as e:
                 L.exception(e)

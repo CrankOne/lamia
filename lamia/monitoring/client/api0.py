@@ -106,9 +106,9 @@ class LamiaMonitoringAPI(object):
         """
         Returns destination address for events of certain process.
         """
-        p = os.path.join(self.get_task_URI_base(), processName)
+        p = os.path.join(self.get_task_URI_base(), processName, 'event')
         if arrayNum is not None:
-            p += '/event?arrayIndex=%s'%str(arrayNum)
+            p += '?arrayIndex=%s'%str(arrayNum)
         return p
 
     def get_task_URI_base(self, taskName=None):

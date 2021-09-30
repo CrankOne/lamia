@@ -123,7 +123,7 @@ def parse_context_stream( argsFPath ):
         cfg = dict(iniCfg._sections)
     elif len(argsFPath) > 5 and '.yaml' == argsFPath[-5:]:
         with open(argsFPath, 'r') as f:
-            cfg = dict(yaml.load(f))
+            cfg = dict(yaml.load(f, Loader=yaml.FullLoader))
     elif len(argsFPath) > 5 and '.json' == argsFPath[-5:]:
         with open(argsFPath) as f:
             cfg = dict(json.load(f))
