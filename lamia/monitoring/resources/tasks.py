@@ -110,8 +110,13 @@ class Tasks(flask_restful.Resource):
                 return {'errors': errors}, 400
             qp = s.load(rqa)  # ? was flask.request.args
         q = S.query(models.Task)
-        if 'tag' in qp:
-            q = q.filter(models.Taks.tags.any(models.Tag.name.in_(filterByTags)))
+        if 'tags' in qp and qp['tags']:
+            L.debug('Filter task by tags: ' + ','.join(qp['tags']))
+            # Works as OR-condition for multiple tags
+            #q = q.filter(models.Task.tags.any(models.Tag.name.in_(qp['tags'])))
+            # AND condition for tags
+            for t in qp['tags']:
+                q = q.filter(models.Task.tags.any(models.Tag.name == t))
         if 'fields' in qp:
             # TODO: `processes' and `tags' must be treated in different way
             # (relationships)

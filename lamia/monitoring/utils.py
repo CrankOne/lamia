@@ -1,5 +1,5 @@
 def apply_pagination(q, qp, model):
-    if not qp: return q
+    if not qp: return q, None
     if 'order' in qp:
         orderBy = getattr(model, qp['order']) 
         if 'sort' in qp:

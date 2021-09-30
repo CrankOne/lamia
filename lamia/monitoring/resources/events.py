@@ -39,7 +39,7 @@ import lamia.monitoring.schemata as schemata
 class Events(flask_restful.Resource):
     method_decorators = [validate_input({'POST': schemata.eventSchema})]
 
-    def get( self, taskName, procName, _meta=None ):
+    def get( self, taskName, procName, _meta=None, id=None ):
         """
         Returns events list for certain process.
         """
@@ -49,9 +49,9 @@ class Events(flask_restful.Resource):
             rqa = flask.request.args.to_dict()
             s = schemata.EventsQuerySchema()
             errors = s.validate(rqa)
-            L.debug('To be validated: ' + str(rqa))
+            L.debug('Event query parameters to be validated: ' + str(rqa))
             if errors:
-                L.debug('Validation errors: ' + str(errors))
+                L.debug('Event validation errors: ' + str(errors))
                 return {'errors': errors}, 400
             qp = s.load(rqa)
             arrayIndex = qp.get('arrayIndex', None)
@@ -69,7 +69,7 @@ class Events(flask_restful.Resource):
         if p is None:
             L.debug(f'Process not found: taskName="{taskName}",'
                     f' procName="{procName}", arrayIndex={arrayIndex}')
-            return {'errors': 'Process not found.'}, 404
+            return {'errors': ['Process not found.']}, 404
         q = S.query(models.Event)
         if arrayIndex is None:
             q = q.filter_by(process=p)
@@ -77,9 +77,20 @@ class Events(flask_restful.Resource):
             q = q.filter_by(process=p, procNumInArray=int(arrayIndex))
         if 'fields' in qp:
             q = q.options(sqlalchemy.orm.load_only(*[f for f in qp['fields']]))
-        q, nTotal = lamia.monitoring.utils.apply_pagination(q, qp, models.Event)
-        return { 'entries': schemata.eventSchema.dump(q.all(), many=True)
-               , 'total': nTotal }
+            # ^^^ TODO: seems to not work...
+        for k in ['eventClass', 'hostname', 'ip']:
+            if k in qp:
+                q = q.filter_by(**{k:qp[k]})
+        if not id:
+            q, nTotal = lamia.monitoring.utils.apply_pagination(q, qp, models.Event)
+            return { 'entries': schemata.eventSchema.dump(q.all(), many=True)
+                   , 'total': nTotal }
+        else:
+            try:
+                e = q.filter_by(id=id).scalar()
+            except:
+                if not e: return {'errors': ['Event not found.']}, 404
+            return schemata.eventSchema.dump(e)
 
     def post( self, vd, _meta=None ):
         """
@@ -89,6 +100,7 @@ class Events(flask_restful.Resource):
         L, S = logging.getLogger(__name__), db.session
         taskName, procName = vd.pop('processRef')
         arrayIndex = flask.request.args.get('arrayIndex', None)
+        L.debug( f'Events POST: {taskName}/{procName} with arrayIndex=' + str(arrayIndex) )
         if arrayIndex is None:
             j = S.query(models.Process).filter_by( name=procName
                                                  , taskID=taskName).one()
@@ -102,7 +114,11 @@ class Events(flask_restful.Resource):
             event = models.Event( process=j, **vd )
         else:
             j = S.query(models.Array).filter_by( name=procName
-                                               , taskID=taskName).one()
+                                               , taskID=taskName).one_or_none()
+            if not j:
+                resp['errors'] = [{ 'reason' : 'Process array does not exist.'
+                                  , 'details' : {'processName': procName } }]
+                return resp, 400
             arrayIndex = int(arrayIndex)
             if arrayIndex > j.nJobs \
             or 0 > arrayIndex:
@@ -124,7 +140,7 @@ class Events(flask_restful.Resource):
                                 , **vd )
             if _meta:
                 if 'time' in _meta:
-                    event.submittedAt = _meta['time']
+                    event.sentAt = _meta['time']
                 if 'host' in _meta:
                     event.hostname = _meta['host']
             event.clientIP = flask.request.remote_addr

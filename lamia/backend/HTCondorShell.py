@@ -159,7 +159,10 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 L.error( "The `JOB_EVENT_ADDR' specified for the environment"
                         " will be overriden." )
             cad['environment']['JOB_EVENT_ADDR'] = monitoringAPI.job_event_address( jobName
-                    , '$(Process)' if self.nProcs else None )
+                    , '$(Process)' if self.nProcs > 1 or self.isImplicitArray else None )
+            L.info( 'Monitoring endpoint (JOB_EVENT_ADDR environment variable)'
+                   + ' for job "%s" will be set'%jobName
+                   + ' to "%s"'%cad['environment']['JOB_EVENT_ADDR'] )
         if len(self.tCmd) > 1:
             if not self.isImplicitArray:
                 cad["arguments"] = self.tCmd[1:]

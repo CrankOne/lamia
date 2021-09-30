@@ -143,12 +143,22 @@ class Process(db.Model):
         """
         Returns the overall progress estimation for the process by retrieving
         maximum "progress" value among all the events related to this process.
+        For the details on how the progress is calculated, see
+        monitoring/README.md.
         """
         L, S = logging.getLogger(__name__), db.session
-        return S.query(sqlalchemy.func.max(Event.progress)) \
+        assert self.kin == kStandaloneProcess
+        # find the maximum of the `progress' value; None if none of the event
+        # brought any value
+        maxProgr = S.query(sqlalchemy.func.max(Event.progress)) \
                  .filter( and_( Event.taskID == self.taskID
                               , Event.procID == self.name )
                         ).scalar()
+        return maxProgr or 0
+
+    #@sqlalchemy.ext.hybrid.hybrid_property
+    #def progress(self):
+
 
 class Array(Process):
     """
@@ -178,23 +188,106 @@ class Array(Process):
     @sqlalchemy.ext.hybrid.hybrid_property
     def progress(self):
         """
+        Computes overall progress for the jobs array.
+        xxx:
         Computes the overall progress estimate for the array by summing up
         the maximum "progress" values for individual jobs.
         An interesting, but frequent usecase, see for reference:
             https://stackoverflow.com/questions/45775724/sqlalchemy-group-by-and-return-max-date
         """
         L, S = logging.getLogger(__name__), db.session
-        subq = S.query( Event.taskID, Event.procID
-                      , Event.procNumInArray
-                      , sqlalchemy.func.max(Event.progress).label('maxprogr')
-                      ).filter( and_( Event.taskID == self.taskID
-                                    , Event.procID == self.name )
-                                    ) \
-                       .group_by(Event.procNumInArray)
+        try:
+            # Among events for current process find
+            # ones with higher progress and compute overall sum.
+            subq = S.query( Event.taskID, Event.procID, Event.eventClass
+                          , Event.procNumInArray
+                          , sqlalchemy.func.max(Event.progress).label('maxprogr')
+                          ).filter( and_( Event.taskID == self.taskID
+                                        , Event.procID == self.name )
+                                        ) \
+                           .group_by(Event.procNumInArray)
+            s = S.query(sqlalchemy.func.sum(subq.subquery().c.maxprogr)).scalar()
+
+            if not s:
+                # Cases #1, #3
+                # None of the event brought progress value (yet?) -- use number
+                # of DONE jobs to estimate the progress for arrays
+                print('xxx #1, #3')
+                subq = S.query( Event.taskID, Event.procID
+                              , Event.procNumInArray
+                              , Event.eventClass
+                              ).filter( and_( Event.taskID == self.taskID
+                                            , Event.procID == self.name
+                                            , Event.eventClass == 'DONE' )
+                                            ) \
+                               .group_by(Event.procNumInArray)
+                # ^^^ subquery that picks up the (taskID, procID, procNum, evClass,
+                # lastRecvTime) for certain process and groups it by procNum. We
+                # just found the latest 'DONE' from each of the group.
+                return subq.count()*100./self.nJobs
+            else:
+                if self.thresholdProgress:
+                    print('xxx #4: thresh and ev.prg set; s=%d'%s)  # XXX
+                    # Case #4
+                    # Threshold and event progress are set, consider event's
+                    # `progress' field as unnormalized estimate vs threshold as
+                    # upper measure
+                    return int(s*100./self.thresholdProgress)
+                else:
+                    print('xxx #2: thresh is not set, ev.prog set; s=%d'%s)  # XXX
+                    # Case #2
+                    # threshold is not set, but progress in the event(s) is. Consider
+                    # per-job latest event to bring normalized completion percentage
+                    return int(s*1./self.nJobs)
+        except Exception as e:
+            L.error('Exception occured while computing progress value'
+                    ' for {self.taskID}/{self.procID}.')
+            L.exception(e)
+            return None
+
+    @sqlalchemy.ext.hybrid.hybrid_property
+    def status(self):
+        """
+        Computes current "status" of the job array that may be either `None`
+        (no events were submitted by any of the jobs) or one of the following
+        strings:
+            - FAILED if number of failed jobs is above the failure
+              tolerance
+            - DONE if all the jobs except for FAILED has at least one event of
+              class DONE or TERMINATED
+            - RUNNING if none of the previous conditions are satisfied
+              (including absence of the events)
+        """
+        # If no events available, return `None`
+        if not self.events.any(): return None
+        # Count the FAILED jobs, return "FAILED" if its number is above the
+        # threshold
+        nFailed = (select([sqlalchemy.func.count(Event.child_id)]).
+                where(Event.procID == cls.name).
+                where(Event.taskID == cls.taskID).
+                label("events_of_class")
+                ).count()
+        if nFailed > (self.fTolerance or 0):
+            return "FAILED"
+        # If each job within the array except for FAILED has at least one of
+        # the TERMINATED or DONE events, return "DONE"
+        return "DONE"
+        # None of the previous conditions are met that means that job is
+        # probably active (has events, but none of them fullfill
+        # completion/failure conditions)
+        return "RUNNING"
+
+        #subq = S.query( Event.taskID, Event.procID
+        #              , Event.procNumInArray
+        #              , sqlalchemy.func.max(Event.progress).label('maxprogr')
+        #              ).filter( and_( Event.taskID == self.taskID
+        #                            , Event.procID == self.name )
+        #                            ) \
+        #               .group_by(Event.procNumInArray)
         # NOTE: the above subquery may be useful base to see per-job-in-array
         # progress summary, e.g.:
         #for r in subq:  print(r)
-        return S.query(sqlalchemy.func.sum(subq.subquery().c.maxprogr)).scalar()
+        #return S.query(sqlalchemy.func.sum(subq.subquery().c.maxprogr)).scalar()
 
     #@sqlalchemy.ext.hybrid.hybrid_method
     #def events_of_job(self, jobNum):

@@ -52,7 +52,7 @@ class Processes(flask_restful.Resource):
         Supported additional query args:
             `hasEventsOfClass=<CLASSNAME>' -- if process name is set to `@all',
             filters processes by presense of certain event (START or DONE
-            may be useful).
+            may be useful). TODO: is it really useful?
         """
         L, S = logging.getLogger(__name__), db.session
         Ps = with_polymorphic( models.Process, [models.Array,] )
@@ -62,9 +62,8 @@ class Processes(flask_restful.Resource):
         #
         if '@all' != processName:
             j = S.query(Ps).filter_by( taskID=taskName, name=processName ).one()
-            #print('xxx', j.lastEventClass)  # XXX
             return schemata.polyProcessSchema.dump(j), 200
-        # Build up a query
+        # Build up a query for all the events of certain class
         q = S.query(Ps)
         if hasEventsOfClass:
              q = q.join(models.Event, models.Process.events).filter(

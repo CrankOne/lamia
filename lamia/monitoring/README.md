@@ -70,12 +70,71 @@ modification of the resource with no side effects.
 * The `PATCH` method implicitly creates a new entities in DB corresponding to
 update brought by `PATCH` request.
 
+## Notes on the "Progress" messages
+
+Process may optionally submit `PROGRESS` message(s) via POST. The request
+JSON's body may (must?) provide integer value named "progress" describing
+current progress estimate. Estimate of overall process or job measure is
+varying depending on whether the *thresholdProgress* of owning process is set.
+
+1. When neither process' threshold is set, nor the job's eventbring any value
+in `PROGRESS` messages, no job progress or solitary process estimation is
+available rather than its status indication. The array process' progress is
+estimated by fraction of processes marked as `DONE`.
+2. When process' threshold is not set but `PROGRESS` event bring some non-zero
+values in their `progress` field, this field is interpreted as percentage
+value (0-100) of individual job. For solitary processes the lates `PROGRESS`
+estimation will define full progress of process, while for array processes,
+it is estimated as sum of individual job's persentegaes divided by overall
+percentage progress.
+3. When no process threshold is set and `PROGRESS` events bring no `progress`
+value, the threshold is considered as number of jobs within the array needed
+to be `DONE` in order to complete the process. This case makes no sense for
+solitary processes. Individual job progress is not available. Overall (array)
+process progress is calculated then as the ratio of `DONE` jobs to process'
+threshold. Once required number `DONE` jobs within the array will be reached,
+the monitoring server will provide additional information for the responses
+indicating that further evaluation for the jobs is no more needed.
+4. When both, the processes' `threshold` and job event's `progress` are set,
+the 
+
+ |   #| Process' thresh | Event progress | Job progress       | Process progress | 
+ |----|-----------------|----------------|--------------------|------------------|
+ |   1| not set         | not set        | (not avail.)       | num of DONE jobs |
+ |   3| not set         | set            | perc. expected     | overall perc.    |
+ | 2,4| set             | not set        | (not avail.)       | num of DONE jobs |
+ |   5| set             | set            | Unnormed estimate  | overall perc.    |
+
+The PROGRESS "payload" may bring arbitrary content.
+
+Use cases:
+1. Bunch of opaque processes, no way to customize sources in order to impose
+cURL code reporting progress to the Lamia monitoring service.
+2. Parallel randomized calculus till some result is found among one of the
+processes.
+3. Track individual progress of jobs: threshold is not set, events bring
+normalized payload (<=100); example: analysis of certain data set
+where each job is performing own specific task -- building a certain histogram.
+4. Process certain number of jobs: threshold is set, events bring no info on
+their progress (competitive evaluation); example: ASAP calculus.
+5. Process certain number of entries overall: threshold is set to absolute
+value, events bring (unnormalized) number of processed entries (example:
+process certain number of physical events).
+
+*Warning*: client code must consider that process' progress estimation may be
+above 100% since jobs do not immediately react (and may not react at all,
+depending on their implementation) on the progress reached the threshold.
+
 ## Running in Development Mode
 
 To get the running development server on localhost with sqlite database stored
 at `/tmp/lamia-restful-test.sqlite3` do:
 
     $ FLASK_DEBUG=1 FLASK_APP=lamia.monitoring.app flask run
+
+xxx:
+
+    $ FLASK_ENV=DEVELOPMENT FLASK_DEBUG=1 python -m lamia.monitoring.app lamia.www/rest-srv.yaml
 
 To check basic communication using `curl` do:
 

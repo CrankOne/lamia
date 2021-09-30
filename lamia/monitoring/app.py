@@ -73,10 +73,8 @@ def create_app(cfg=None):
 
         api.add_resource( Events
                 , '/api/v0/<taskName>/<procName>/event'
-                #, '/api/v0/<taskName>/<procName>/<int:procNumInArray>'  # xxx, query-encoded
+                , '/api/v0/<taskName>/<procName>/event/<id>'
                 )
-        #app.add_url_rule('/api/tasks',  view_func=Tasks.as_view('tasks'))
-        #app.add_url_rule('/api/events', view_func=Events.as_view('events'))
         @app.route('/')
         def root_view():
             return 'Here be dragons.'

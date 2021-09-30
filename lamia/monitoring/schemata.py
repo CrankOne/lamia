@@ -190,8 +190,8 @@ class TasksQuerySchema(marshmallow.Schema):
     @marshmallow.pre_load
     def split_lists(self, inData_, **kwargs):
         inData = dict(inData_)
-        if 'tag' in inData:
-            inData['tag'] = inData['tag'].split(',')
+        if 'tags' in inData:
+            inData['tags'] = list( t for t in inData['tags'].split(',') if t )
         if 'fields' in inData:
             inData['fields'] = inData['fields'].split(',')
             #inData['fields'] = list( f if f != 'tags' else 'tags.name' for f in inData['fields'] )
@@ -232,14 +232,19 @@ class EventsQuerySchema(marshmallow.Schema):
     Supports following fields:
         - fields -- list of strings refering ones from model
         - offset, limit, order, sort -- query limiting arguments
-        - class, procNum, IP/host -- TODO
+        - arrayIndex -- number of process within the array
+        - class, IP/host -- TODO
     """
+    id = marshmallow.fields.Int()
     fields = marshmallow.fields.List(marshmallow.fields.Str())
     arrayIndex = marshmallow.fields.Int()
     offset = marshmallow.fields.Int()
     limit = marshmallow.fields.Int()
     order = marshmallow.fields.Str()  # TODO: oneof
     sort = marshmallow.fields.Str(validate=marshmallow.validate.OneOf(['asc', 'desc']))
+    eventClass = marshmallow.fields.Str()
+    hostname = marshmallow.fields.Str()
+    ip = marshmallow.fields.Str()
 
     @marshmallow.pre_load
     def split_lists(self, inData_, **kwargs):
