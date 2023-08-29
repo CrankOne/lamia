@@ -27,7 +27,7 @@ import lamia.core.interpolation, lamia.core.configuration, lamia.confirm
 from enum import Enum
 from string import Formatter
 
-rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@/\n]+)(?:@(?P<alias>[_\-\w]+))?$'
+rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@\n]+)(?:@(?P<alias>[_\-\w]+))?$'
 rxFSStruct = re.compile(rxsFSStruct)
 rxFmtPat = re.compile(r'\{[^}\s]+\}')
 
@@ -532,14 +532,22 @@ class PathsDeployment(object):
     def assure_dir_exists( self, dp, pathCtx={}, alias=None ):
         """
         Recursively creates directory by given path. Absolute path is required
-        to start from self.root. Relative path will be considered from
-        self.root.
+        to start from self.root, otherwise a warning will be printed. Relative
+        path will be considered from self.root.
         """
         L = logging.getLogger(__name__)
         assert( os.path.isabs(self.root) )
         if os.path.isabs(dp):
-            assert( self.root == os.path.commonprefix([self.root, dp]) )
-            relPath = self.normalized_relative_path(dp)
+            #assert( self.root == os.path.commonprefix([self.root, dp]) )
+            if self.root != os.path.commonprefix([self.root, dp]):
+                L.warning('Path %s is not relative to %s'%(dp, self.root))
+                absPath = dp
+                os.makedirs(dp, exist_ok=True)
+                if alias:
+                    self.alias_instantiated(alias, dp, pathCtx)
+                return None
+            else:
+                relPath = self.normalized_relative_path(dp)
         else:
             relPath = dp
         # Fill path tokens list (will contain somewhat reversed form, i.e.:
