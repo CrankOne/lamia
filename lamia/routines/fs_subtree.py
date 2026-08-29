@@ -154,6 +154,21 @@ def contxtual_path( fstruct, env, base=None ):
     """
     def _ap( v, requireComplete=True, abspath=False, reflexive=False ):
         L = logging.getLogger(__name__)
+        # Alias references carry their own mount association (possibly a
+        # different physical root than `base' below, e.g. an FUSE-mounted
+        # branch of the subtree) -- resolve those through the mount-aware
+        # machinery directly and skip the `base'-join fallback entirely.
+        if abspath and type(v) is str and v and '@' == v[0]:
+            try:
+                return lamia.core.filesystem.auto_path(
+                        v, fStruct=fstruct
+                        , requireComplete=requireComplete
+                        , reflexive=reflexive
+                        , abspath=True
+                        , **env.pStk )
+            except:
+                L.error('..while interpolating alias entity: %s'%str(v))
+                raise
         try:
             r = lamia.core.filesystem.auto_path(
                     v, fStruct=fstruct

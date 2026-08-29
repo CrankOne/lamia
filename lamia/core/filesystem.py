@@ -31,6 +31,27 @@ rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@/\n]+)(?:@(?P<alias>[_\-\w]+))?$'
 rxFSStruct = re.compile(rxsFSStruct)
 rxFmtPat = re.compile(r'\{[^}\s]+\}')
 
+# Reserved dict keys recognized at any level of a subtree manifest (never
+# treated as ordinary `name[@alias]' FS entries):
+#   `mounts' -- (once, typically at the tree's root) declares the table of
+#       named physical roots {label: templatedAbsPath | "$root"} a subtree
+#       may be deployed across. Exactly one label must be the literal
+#       sentinel "$root", which stands for whatever base directory is passed
+#       programmatically to create_on()/deploy_fs_struct() -- that label
+#       becomes the implicit mount for nodes without an explicit `_mount'.
+#   `_mount' -- (on any node) switches that node's, and its descendants',
+#       effective mount to one of the labels declared in `mounts'. Inherited
+#       down the tree until overridden again.
+# See Paths._resolve_mounts() and Paths._generate().
+gReservedMountsKey = 'mounts'
+gReservedMountKey = '_mount'
+# Sentinel value marking, within a `mounts:' table, which label is bound to
+# the externally-supplied deployment root.
+gRootMountSentinel = '$root'
+# Synthesized label used when a subtree declares no `mounts:' table at all
+# (legacy, single-root subtree) -- deployment behaves exactly as before.
+gDefaultMountLabel = '__default__'
+
 # Default access mode for files created.
 DFTFMOD = 0o664  # TODO: use
 
@@ -304,7 +325,7 @@ class FileHandlerContextManager(object):
     """
 
     def __init__( self, path, createdRef, globContextRef, locContextRef
-                , subtree, creationMode=None, alias=None ):
+                , subtree, creationMode=None, alias=None, mount=None ):
         assert(isinstance(globContextRef, lamia.core.configuration.Stack))
         self.createdRef = createdRef
         self.gCtxRef = globContextRef
@@ -314,6 +335,7 @@ class FileHandlerContextManager(object):
         self._file = None
         self._creationMode = creationMode
         self._alias = alias
+        self._mount = mount
 
     def __enter__(self):
         self.gCtxRef.push(
@@ -344,7 +366,7 @@ class FileHandlerContextManager(object):
         # In this case, when parent dir(s) have aliases, the won't be indexed
         # as instantiated alis. Despito of this, when the subsequnet assure..()
         # will happen, the missed aliased dirs will be injected, though.
-        self.createdRef.assure_dir_exists( dirPath, self.lCtxRef )
+        self.createdRef.assure_dir_exists( dirPath, self.lCtxRef, mount=self._mount )
         if os.path.exists( self._path ):
             while not self.createdRef.mode == PathsDeployment.Operation.OVERWRITE:
                 uChs = lamia.confirm.ask_for_variants( 'File "%s" exists.'%self._path, {
@@ -399,7 +421,7 @@ class FileHandlerContextManager(object):
             if PathsDeployment.Operation.GENERATE == self.createdRef.mode \
             or PathsDeployment.Operation.OVERWRITE == self.createdRef.mode :
                 if self.write_rendered():
-                    self.createdRef.add_created_file(self._path, self.lCtxRef)
+                    self.createdRef.add_created_file(self._path, self.lCtxRef, mount=self._mount)
                     L.debug( ' .."{path}" of {size} bytes'.format(
                         path=self._path, size=cl) )
             elif PathsDeployment.Operation.EXTRACT_DIFFS:
@@ -446,21 +468,27 @@ class PathsDeployment(object):
             return PathsDeployment.alias_for( aliases[nm], **kwargs )
         return _alias_query_concrete
 
-    def __init__(self, root, subtree, mode=Operation.GENERATE ):
+    def __init__(self, roots, subtree, mode=Operation.GENERATE, defaultMount=None ):
         """
-        Creates the new deployment object. The `root' is required to be a
-        string path pointing to the base directory, where the subtree has to
-        be deployed.
+        Creates the new deployment object. `roots' is required to be a
+        non-empty dict mapping mount labels to string paths pointing to the
+        base directories where corresponding branches of the subtree have to
+        be deployed. `defaultMount' names the label (a key of `roots') to use
+        for any node that does not declare its own `_mount' override.
         """
-        assert(type(root) is str)
+        assert(type(roots) is dict and roots)
+        assert(defaultMount in roots)
         # list of path (as strings) being visited
         self.visited = set()
-        # filesystem subtree dict-like tree of entities being created
+        # filesystem subtree dict-like tree of entities being created,
+        # keyed by their absolute path (so entries from different mounts
+        # can never collide)
         self._created = collections.OrderedDict()
         # current list of path tokens, stacked during recursive traversal
         self._path = []
-        # base directory for deployment (filesystem subtree prefix)
-        self.root = os.path.realpath( root )
+        # base directories for deployment, one per named mount
+        self.roots = { label : os.path.realpath(r) for label, r in roots.items() }
+        self.defaultMount = defaultMount
         # Reference to currently processed subtree
         self._subtree = subtree
         # What to do with content obtained by rendering of the templates
@@ -468,6 +496,19 @@ class PathsDeployment(object):
         # Collection of instantiated aliased entries. Dict has form
         # <aliasName> : [( <path>, <context> ), ...]
         self.instdAliases = {}
+
+    def root_for(self, mount=None):
+        """ Resolves a mount label (or the default one) to its base dir. """
+        label = mount or self.defaultMount
+        if label not in self.roots:
+            raise KeyError( 'Unknown mount "%s". Declared mounts: %s'%(
+                    label, ', '.join(self.roots.keys())) )
+        return self.roots[label]
+
+    @property
+    def root(self):
+        """ Kept for backward compat: the default mount's resolved root. """
+        return self.roots[self.defaultMount]
 
     def push(self, dirName):
         """ Appends the stack of current path tokens. """
@@ -488,28 +529,32 @@ class PathsDeployment(object):
         """
         return copy.copy(self._path)
 
-    def current_path(self, full=False, asString=False):
+    def current_path(self, full=False, asString=False, mount=None):
         """
         An advanced method for retrieving current path stack: with or without
-        root dir, whether or not to be merged into the string path.
+        root dir, whether or not to be merged into the string path. `mount'
+        selects which root to prepend when `full' is set (defaults to the
+        deployment's default mount).
         """
         # Get the copy of current stack
         ret = self.path
         # If `full' is requested, prepend with root
         if full:
-            if type(self.root) is str:
-                ret.insert( 0, self.root )
-            elif type(self.root) in (tuple, list):
-                ret = list(self.root) + ret
+            root = self.root_for(mount)
+            if type(root) is str:
+                ret.insert( 0, root )
+            elif type(root) in (tuple, list):
+                ret = list(root) + ret
         # If string form is requested, use os.path.join() to merge a list
         if asString:
             return os.path.join(*ret)
         else:
             return tuple(ret)
 
-    def normalized_relative_path( self, pt_ ):
+    def normalized_relative_path( self, pt_, mount=None ):
         """
-        Returns normalized relative path within root directory subtree.
+        Returns normalized relative path within the given mount's root
+        directory subtree (defaults to the deployment's default mount).
         """
         if type(pt_) in (tuple, list):
             pt = os.path.join(pt_)
@@ -518,28 +563,34 @@ class PathsDeployment(object):
         else:
             raise TypeError('Expected str, tuple or list.'
                     ' Got: %s'%type(pt_).__name__)
-        cmPrfx = os.path.commonprefix( [pt, self.root] )
+        root = self.root_for(mount)
+        cmPrfx = os.path.commonprefix( [pt, root] )
         if not cmPrfx:
-            relPath = absPath
-        elif cmPrfx == self.root:
-            relPath = os.path.relpath( pt, start=self.root )
+            raise RuntimeError('Path "{locPt}" shares no common prefix with'
+                    ' mount "{mount}" root "{root}".'.format(
+                        locPt=pt, mount=mount or self.defaultMount, root=root ))
+        elif cmPrfx == root:
+            relPath = os.path.relpath( pt, start=root )
         else:
             raise RuntimeError('Wrong common prefix: "{prefix}".'
                     '"{locPt}" path is expected to be in a subtree'
-                    ' of "{root}".'.format( prefix=cmPrfx, locPt=pt, root=self.root ))
+                    ' of "{root}".'.format( prefix=cmPrfx, locPt=pt, root=root ))
         return relPath
 
-    def assure_dir_exists( self, dp, pathCtx={}, alias=None ):
+    def assure_dir_exists( self, dp, pathCtx={}, alias=None, mount=None ):
         """
-        Recursively creates directory by given path. Absolute path is required
-        to start from self.root. Relative path will be considered from
-        self.root.
+        Recursively creates directory by given path. Absolute path is
+        required to start from the resolved root of `mount' (or the default
+        mount). Relative path will be considered from that same root.
         """
         L = logging.getLogger(__name__)
-        assert( os.path.isabs(self.root) )
+        root = self.root_for(mount)
+        assert( os.path.isabs(root) )
         if os.path.isabs(dp):
-            assert( self.root == os.path.commonprefix([self.root, dp]) )
-            relPath = self.normalized_relative_path(dp)
+            assert root == os.path.commonprefix([root, dp]), \
+                    'Path "%s" is not within mount "%s" root "%s".'%(
+                            dp, mount or self.defaultMount, root)
+            relPath = self.normalized_relative_path(dp, mount=mount)
         else:
             relPath = dp
         # Fill path tokens list (will contain somewhat reversed form, i.e.:
@@ -549,31 +600,30 @@ class PathsDeployment(object):
         while pt:
             pt, tok = os.path.split(pt)
             ptoks.append(tok)
-        c = [self.root]
+        c = [root]
         for dp in reversed(ptoks):
             c.append(dp)
             jp = os.path.join(*c)
             if os.path.isdir(jp):
                 continue
             os.mkdir(jp)
-            cRelPath = os.path.relpath(jp, start=self.root)
-            assert(cRelPath not in self._created)
-            self._created[cRelPath] = pathCtx
-            L.debug('Dir "%s" created.'%cRelPath )
+            assert(jp not in self._created)
+            self._created[jp] = pathCtx
+            L.debug('Dir "%s" created.'%jp )
         if alias:
-            self.alias_instantiated( alias, os.path.join(self.root, relPath), pathCtx )
+            self.alias_instantiated( alias, os.path.join(root, relPath), pathCtx )
 
-    def add_created_file(self, fp, pathCtx={} ):
+    def add_created_file(self, fp, pathCtx={}, mount=None ):
         L = logging.getLogger(__name__)
         dirPath, _ = os.path.split( fp )
-        self.assure_dir_exists( dirPath, pathCtx )
-        nrp = self.normalized_relative_path(fp)
-        self._created[nrp] = pathCtx
-        L.debug('File "%s" created.'%nrp )
+        self.assure_dir_exists( dirPath, pathCtx, mount=mount )
+        self._created[fp] = pathCtx
+        L.debug('File "%s" created.'%fp )
 
-    def handle_file(self, path, globPathCtx, locPathCtx, mode=None, alias=None):
+    def handle_file(self, path, globPathCtx, locPathCtx, mode=None, alias=None, mount=None):
         mgr = FileHandlerContextManager( path, self, globPathCtx,
-                locPathCtx, self._subtree, creationMode=mode, alias=alias)
+                locPathCtx, self._subtree, creationMode=mode, alias=alias
+                , mount=mount)
         return mgr
 
     def clean_created(self):
@@ -613,9 +663,19 @@ class Paths( collections.MutableMapping ):
             raise TypeError( 'At %s: dict expected, got %s.'%('.'.join(path)
                            , type(dirStruct)) )
         for k, value in dirStruct.items():
+            if gReservedMountsKey == k:
+                self._mountsTable.update(value)
+                continue
+            if gReservedMountKey == k:
+                self._mounts[ os.path.join(*path) if path else '' ] = value
+                continue
             nm, v = self._new_entry_at(path, k, value)
             ret[nm] = v
-        return ret
+        # A node whose only content was reserved keys (`_mount' typically)
+        # collapses to a plain leaf directory, same as an explicitly empty
+        # dict -- must NOT surface as a (harmless-looking) empty dict, or
+        # downstream alias/dir handling in _generate() would double-visit it.
+        return ret if ret else None
 
     def _new_entry_at( self, path, templatedName, value ):
         L = logging.getLogger(__name__)
@@ -644,6 +704,16 @@ class Paths( collections.MutableMapping ):
     def __init__(self, initObject, contextHooks={}, conditions={}):
         self._aliases = bidict.bidict({})
         self._files = {}
+        # Per-node mount overrides, keyed by (unrendered) template path; see
+        # gReservedMountKey.
+        self._mounts = {}
+        # Raw (unrendered) {label: templatedPath|"$root"} table; see
+        # gReservedMountsKey.
+        self._mountsTable = {}
+        # Populated by create_on(): {label: resolvedAbsPath}, and the label
+        # used as the implicit mount. None until a deployment is underway.
+        self._resolvedRoots = None
+        self._defaultMount = None
         self._dStruct = self._treat_expression( initObject )
         self.contextHooks = contextHooks
         self.conditions = conditions
@@ -687,13 +757,16 @@ class Paths( collections.MutableMapping ):
     def __iter__(self):
         return iter(self._dStruct)
 
-    def paths_from_template(self, pt, requireComplete=True, reflexive=False, **kwargs):
+    def paths_from_template(self, pt, requireComplete=True, reflexive=False
+                           , abspath=False, mount=None, **kwargs):
         entries = []
         relevantKeys = list(filter( lambda tok: tok, [i[1] for i in Formatter().parse(pt)]))
         for argsSubset in dict_product(**{k : _rv_value(kwargs, k, requireComplete=requireComplete) for k in relevantKeys}):
             entry = pt.format_map( DictFormatWrapper( **dict(argsSubset)
                                             , requireComplete=requireComplete )
                                  )
+            if abspath:
+                entry = os.path.join( self._root_for_mount(mount), entry )
             if reflexive:
                 entry = ( entry, argsSubset )
             entries.append( entry )
@@ -702,10 +775,44 @@ class Paths( collections.MutableMapping ):
         else:
             return entries
 
+    def _root_for_mount(self, mount=None):
+        """
+        Resolves a mount label to its deployment-time absolute root. Only
+        meaningful once create_on() has run (typically called from within a
+        template-rendering context hook, i.e. during deployment).
+        """
+        if self._resolvedRoots is None:
+            raise RuntimeError( "Absolute-path resolution requested outside"
+                    " of subtree deployment: no mount root(s) have been"
+                    " resolved yet. This is only meaningful when called from"
+                    " within create_on() (e.g. from a context hook)." )
+        label = mount or self._defaultMount
+        if label not in self._resolvedRoots:
+            raise KeyError( 'Unknown mount "%s". Declared mounts: %s'%(
+                    label, ', '.join(self._resolvedRoots.keys())) )
+        return self._resolvedRoots[label]
 
-    def __call__(self, alias, requireComplete=True, reflexive=False, **kwargs):
+    def _mount_for_alias(self, alias):
+        """
+        Resolves the effective mount label for a given alias by walking its
+        template path from the most specific (itself) up to the root,
+        looking for the nearest `_mount' override; falls back to the
+        deployment's default mount.
+        """
+        templatePath = self._aliases[alias]
+        toks = templatePath.split(os.sep)
+        for i in range(len(toks), 0, -1):
+            candidate = os.sep.join(toks[:i])
+            if candidate in self._mounts:
+                return self._mounts[candidate]
+        return self._defaultMount
+
+    def __call__(self, alias, requireComplete=True, reflexive=False
+                , abspath=False, **kwargs):
         """
         Returns rendered template string w.r.t. to given keyword arguments.
+        If `abspath' is set, the result is prefixed with the alias' resolved
+        mount root (deployment must be underway, cf. _root_for_mount()).
         """
         L = logging.getLogger(__name__)
         try:
@@ -717,9 +824,12 @@ class Paths( collections.MutableMapping ):
                 ', '.join('"%s"'%str(a) for a in self._aliases.keys())
                 ) )
             raise
+        mount = self._mount_for_alias(alias) if abspath else None
         return self.paths_from_template( pt
                                        , requireComplete=requireComplete
                                        , reflexive=reflexive
+                                       , abspath=abspath
+                                       , mount=mount
                                        , **kwargs )
     def __str__(self):
         """
@@ -735,9 +845,13 @@ class Paths( collections.MutableMapping ):
                  , createdRef=None
                  , pathCtx={}
                  , leafHandler=None
-                 , tContext={} ):
+                 , tContext={}
+                 , mount=None ):
         """
         Generates the particular node (file or directory) recursively.
+        `mount' carries the currently-effective mount label, inherited from
+        the parent node unless this node (by its template path) declares its
+        own `_mount' override.
         """
         L = logging.getLogger('lamia.filesystem')
         assert(createdRef)
@@ -745,22 +859,23 @@ class Paths( collections.MutableMapping ):
             createdRef.push(k)
             templatePath = createdRef.current_path(full=False, asString=True)
             fsEntryAlias = self._aliases.inv.get(templatePath, None)
+            nodeMount = self._mounts.get(templatePath, mount)
             if type(v) is dict:
                 self._generate( v, pathCtx=pathCtx
                     , leafHandler=leafHandler, tContext=tContext
-                    , createdRef=createdRef )
+                    , createdRef=createdRef, mount=nodeMount )
                 if fsEntryAlias:
                     for p, tmpContext in render_path_templates(
-                                *createdRef.current_path(full=True),
+                                *createdRef.current_path(full=True, mount=nodeMount),
                                 requireComplete=True, **pathCtx ):
-                        createdRef.assure_dir_exists( p, tmpContext, alias=fsEntryAlias )
+                        createdRef.assure_dir_exists( p, tmpContext, alias=fsEntryAlias, mount=nodeMount )
             if not leafHandler:
                 createdRef.pop(k)
                 continue
             # 'Templated' relative path subtree token. Used as key to identify
             # particular file entity.
             # Iterate over all possible instantiations of current path template
-            for p, tmpContext in render_path_templates( *createdRef.current_path(full=True)
+            for p, tmpContext in render_path_templates( *createdRef.current_path(full=True, mount=nodeMount)
                                                        , requireComplete=True
                                                        , **pathCtx ):
                 fileDescription = self._files.get(templatePath, None)
@@ -799,7 +914,7 @@ class Paths( collections.MutableMapping ):
                     # If it is not a file, just ensure dir exists and that's
                     # it. Note, that if dir was existing before the execution,
                     # it won't be added to "created" index.
-                    createdRef.assure_dir_exists( p, tmpContext, alias=fsEntryAlias )
+                    createdRef.assure_dir_exists( p, tmpContext, alias=fsEntryAlias, mount=nodeMount )
                     continue
                 if fileDescription is None:
                     # No description provided for file entry -- it's a shortcut
@@ -809,6 +924,7 @@ class Paths( collections.MutableMapping ):
                 with createdRef.handle_file( p, tContext, tmpContext
                         , mode=None if type(fileDescription) is str else fileDescription.get('mode', None)
                         , alias=fsEntryAlias
+                        , mount=nodeMount
                         ) as (context, hf):
                     try:
                         leafHandler( fileDescription, hf
@@ -821,6 +937,45 @@ class Paths( collections.MutableMapping ):
                         raise
             createdRef.pop(k)
 
+    def _resolve_mounts(self, root, pathCtx):
+        """
+        Interpolates the `mounts:' table (if any) declared within this
+        subtree manifest against the given path-rendering context, producing
+        a {label: absPath} dict of deployment roots plus the label to use as
+        the implicit (inherited-by-default) mount.
+
+        Exactly one label in the table must be the literal sentinel "$root":
+        it receives `root' verbatim (the externally-supplied, already
+        resolved base directory -- e.g. `workspaceDir') and becomes that
+        implicit mount. If no `mounts:' table was declared at all (a legacy,
+        single-root subtree), a single mount is synthesized from `root' and
+        no `_mount' override may reference anything else.
+        """
+        if not self._mountsTable:
+            return { gDefaultMountLabel : root }, gDefaultMountLabel
+        roots = {}
+        defaultMount = None
+        dfw = DictFormatWrapper( **dict(pathCtx), requireComplete=True )
+        for label, tmpl in self._mountsTable.items():
+            if gRootMountSentinel == tmpl:
+                if defaultMount is not None:
+                    raise RuntimeError( 'Ambiguous mounts table: both "%s"'
+                            ' and "%s" are declared as "%s".'%(
+                                defaultMount, label, gRootMountSentinel) )
+                roots[label] = root
+                defaultMount = label
+                continue
+            if type(tmpl) is not str:
+                raise TypeError( 'Mount "%s" must resolve to a string path'
+                        ' (got %s).'%(label, type(tmpl).__name__) )
+            roots[label] = tmpl.format_map(dfw)
+        if defaultMount is None:
+            raise RuntimeError( 'Mounts table declares no "%s" entry --'
+                    ' exactly one label must be set to the literal string'
+                    ' "%s" to receive the externally-supplied deployment'
+                    ' root.'%(gRootMountSentinel, gRootMountSentinel) )
+        return roots, defaultMount
+
     def create_on( self, root
                  , pathCtx={}
                  , tContext={}
@@ -830,7 +985,10 @@ class Paths( collections.MutableMapping ):
                  , mode=PathsDeployment.Operation.GENERATE ):
         """
         Entry point for in-dir subtree creation.
-            @root is a base dir where the subtree must start
+            @root is a base dir where the subtree must start (bound to
+                whichever mount the manifest's `mounts:' table marks "$root",
+                or to the sole implicit mount for legacy, mounts-less
+                manifests)
             @tContext is a file template context
             @pathCtx is a secial path-rendering context
             @leafHandler is file-template rendering object
@@ -843,14 +1001,19 @@ class Paths( collections.MutableMapping ):
         Returns a dictionary of instantiated aliases.
         """
         L = logging.getLogger(__name__)
+        roots, defaultMount = self._resolve_mounts( root, pathCtx )
+        self._resolvedRoots = roots
+        self._defaultMount = defaultMount
         if createdRef is None:
-            createdRef = PathsDeployment( root, self, mode=mode )
+            createdRef = PathsDeployment( roots, self, mode=mode
+                                         , defaultMount=defaultMount )
         try:
             self._generate( self if level is None else dpath.util.get(self, level)
                     , pathCtx=pathCtx
                     , tContext=tContext
                     , leafHandler=leafHandler
-                    , createdRef=createdRef )
+                    , createdRef=createdRef
+                    , mount=defaultMount )
         except Exception as e:
             nEntriesCreated = len(createdRef._created)
             L.error('An error occured during rendering subtree in "%s":'%root)
@@ -871,6 +1034,7 @@ def auto_path( p
              , fStruct=None
              , requireComplete=True
              , reflexive=False
+             , abspath=False
              , **kwargs ):  # TODO: since we have kws here, **kwargs -> pathVars
     """
     `p' must be a string identifying the path in a following manner:
@@ -882,6 +1046,10 @@ def auto_path( p
         by **kwargs.
     `fStruct' is expected to be an FS subtree description. If it is omitted,
     no `@' alias could be discovered.
+    If `abspath' is set and `fStruct' is given, the result is resolved to an
+    absolute path against the alias'/template's effective mount root (cf.
+    Paths.__call__()/Paths.paths_from_template()); meaningless without
+    `fStruct' since a bare formatted string carries no mount association.
     """
     L = logging.getLogger(__name__)
     try:
@@ -897,7 +1065,7 @@ def auto_path( p
         #    raise KeyError('File structure does not define alias "%s"'%p)
         try:
             return fStruct(p[1:], requireComplete=requireComplete,
-                    reflexive=reflexive, **kwargs)
+                    reflexive=reflexive, abspath=abspath, **kwargs)
         except:
             L.error('..during expansion of alias "%s".'%(p))
             raise
@@ -916,6 +1084,7 @@ def auto_path( p
         else:
             return fStruct.paths_from_template( p, requireComplete=requireComplete
                                            , reflexive=reflexive
+                                           , abspath=abspath
                                            , **kwargs )
     else:
         if not reflexive:

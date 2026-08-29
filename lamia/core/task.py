@@ -83,17 +83,30 @@ class Task(object):
     argparse's "epilog" message (printed at the end after the usage info in
     help/usage reference).
     """
-    def add_parameters(self, ps):
+    def add_parameters(self, ps, classDefaults={}):
+        """
+        `classDefaults' (the task class' own `__defaults', cumulative across
+        bases) supplies the *weakest* tier of default for any parameter
+        declared here that it also names: applied first, so a value from the
+        user's config file (`self._userDefaults', cf. run()'s
+        `overrideDefaults') can still override it, and an explicit CLI
+        argument overrides both (argparse's own behavior). Returns
+        (usedUserDfts, usedClassDfts): the subsets of `self._userDefaults'/
+        `classDefaults' that matched a parameter actually declared here.
+        """
         L = logging.getLogger()
         if self._userDefaults is None:
             self._userDefaults = {}
-        usedUserDfts = set(self._userDefaults.keys())
-        self._argNames = set()
+        usedUserDfts = set()
+        usedClassDfts = set()
         for pName, pDescr in ps.items():
             if '@' != pName[0]:
                 shortcut, name = _argparse_par(pName) #list(filter(lambda x: x, _argparse_par(pName)))
                 self._argNames.add( name if name else shortcut )
                 assert( name or shortcut )
+                if name and name in classDefaults:
+                    pDescr['default'] = classDefaults[name]
+                    usedClassDfts.add(name)
                 if name and name in self._userDefaults:
                     pDescr['default'] = self._userDefaults[name]
                     L.debug( '{name} default is set/overriden by users {value}'.format(
@@ -108,29 +121,42 @@ class Task(object):
             else:
                 self.argParser.add_argument( pName[1:], **pDescr )
                 L.debug('Added a positional argument.')
-        return usedUserDfts
+        return usedUserDfts, usedClassDfts
 
     def _instantiate_arg_parser(self):
         L = logging.getLogger(__name__)
         self._p = argparse.ArgumentParser( self.__class__.__doc__,
                 epilog=getattr( self.__class__
                               , '_%s__epilog'%self.__class__.__name__, None ) )
+        self._argNames = set()
+        dfts = self.get_defaults()
+        dfts = lamia.core.configuration.Stack( dfts if dfts else [] )
         usedUserDfts = set()
+        usedClassDfts = set()
         for pN in ['common_parameters', 'exec_parameters']:
             ps = getattr(self, 'get_%s'%pN)()
             L.debug( 'Task base class: got list of length %d for "%s".'%(
                 len(ps), pN ) )
             ps = lamia.core.configuration.Stack( ps if ps else [] )
             L.debug( 'Top entities in stack: %s.'%(', '.join( '"%s"'%k for k in ps.keys() )) )
-            usedUserDfts |= self.add_parameters( ps )
+            uUD, uCD = self.add_parameters( ps, classDefaults=dfts )
+            usedUserDfts |= uUD
+            usedClassDfts |= uCD
         unusedUserDfts = set(self._userDefaults.keys()) - usedUserDfts
         if unusedUserDfts:
             L.warning( 'Unused user defaults: %s'%(', '.join(unusedUserDfts)) )
         #self.add_parameters( lamia.core.configuration.Stack(self.get_common_parameters()) )
         #self.add_parameters( lamia.core.configuration.Stack(self.get_exec_parameters()) )
-        dfts = self.get_defaults()
-        dfts = lamia.core.configuration.Stack( dfts if dfts else [] )
-        self._p.set_defaults( **dfts )
+        # Class-level defaults that name no CLI-declared parameter at all
+        # (no `common_parameters'/`exec_parameters' entry) still have to
+        # land in the parsed namespace -- set_defaults() is the only way to
+        # do that. For names that DO correspond to a declared parameter,
+        # set_defaults() would unconditionally re-clobber whatever priority
+        # was already resolved above (it mutates the argparse action's
+        # `default' directly, regardless of who set it last), so those are
+        # excluded here.
+        leftoverDfts = { k : v for k, v in dfts.items() if k not in usedClassDfts }
+        self._p.set_defaults( **leftoverDfts )
         L.debug( 'Default values set for %s.'%(', '.join(
             ['%s="%s"'%(k, str(v)) for k, v in dfts.items()])) )
 
