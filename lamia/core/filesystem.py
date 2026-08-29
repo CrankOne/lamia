@@ -587,9 +587,21 @@ class PathsDeployment(object):
         root = self.root_for(mount)
         assert( os.path.isabs(root) )
         if os.path.isabs(dp):
-            assert root == os.path.commonprefix([root, dp]), \
-                    'Path "%s" is not within mount "%s" root "%s".'%(
-                            dp, mount or self.defaultMount, root)
+            if root != os.path.commonprefix([root, dp]):
+                # Legacy escape hatch: a node name embedding a raw absolute
+                # path foreign to every declared mount (pre-dates `mounts:'/
+                # `_mount:' -- migrate such fstructs when convenient). Warn
+                # and deploy it there directly rather than failing outright.
+                L.warning( 'Path "%s" is not within mount "%s" root "%s" --'
+                        ' deploying it there directly (not tracked for'
+                        ' rollback-on-error). Consider migrating this'
+                        ' fstruct to a `mounts:\'/`_mount:\' declaration'
+                        ' instead of an embedded absolute path.'%(
+                            dp, mount or self.defaultMount, root) )
+                os.makedirs( dp, exist_ok=True )
+                if alias:
+                    self.alias_instantiated( alias, dp, pathCtx )
+                return
             relPath = self.normalized_relative_path(dp, mount=mount)
         else:
             relPath = dp
@@ -976,6 +988,30 @@ class Paths( collections.MutableMapping ):
                     ' root.'%(gRootMountSentinel, gRootMountSentinel) )
         return roots, defaultMount
 
+    def resolve_mounts(self, root, pathCtx={}):
+        """
+        Public entry point for _resolve_mounts(): populates
+        _resolvedRoots/_defaultMount so that abspath=True alias resolution
+        (__call__()/paths_from_template()) works.
+
+        create_on() calls this itself at the start of a deployment pass, so
+        callers don't normally need to call it directly -- EXCEPT that some
+        callers legitimately need an abspath=True lookup *before* (or wholly
+        without) an actual create_on() pass, e.g. to prepare an input file
+        the deployment will later reference (cf. adjust_detsdat_for_runs()
+        resolving `@localDetsDat' ahead of subtree deployment). For those,
+        call this explicitly first -- or, more robustly, go through
+        lamia.routines.fs_subtree.contxtual_path(), which already does.
+        Idempotent and cheap to call more than once (e.g. once early via
+        contxtual_path(), then again from within create_on()): mounts must
+        only ever reference context that doesn't vary over the deployment
+        (unlike ordinary path tokens), so re-resolving is a no-op in effect.
+        """
+        roots, defaultMount = self._resolve_mounts( root, pathCtx )
+        self._resolvedRoots = roots
+        self._defaultMount = defaultMount
+        return roots, defaultMount
+
     def create_on( self, root
                  , pathCtx={}
                  , tContext={}
@@ -1001,9 +1037,7 @@ class Paths( collections.MutableMapping ):
         Returns a dictionary of instantiated aliases.
         """
         L = logging.getLogger(__name__)
-        roots, defaultMount = self._resolve_mounts( root, pathCtx )
-        self._resolvedRoots = roots
-        self._defaultMount = defaultMount
+        roots, defaultMount = self.resolve_mounts( root, pathCtx )
         if createdRef is None:
             createdRef = PathsDeployment( roots, self, mode=mode
                                          , defaultMount=defaultMount )

@@ -17,12 +17,18 @@ class TestLamiaFilesystemTemplates(UT.TestCase):
                     "{period}@periodDir",
                     "!run-{runID}@runDir",
                     "!{variant}@varDir",
+                    # A raw path separator in the (non-aliased) name itself
+                    # is allowed -- the legacy escape hatch for embedding an
+                    # absolute path foreign to any declared mount directly
+                    # in a node name (see PathsDeployment.assure_dir_exists'
+                    # warn-and-deploy-anyway fallback); prefer `mounts:'/
+                    # `_mount:' for anything new.
+                    "/tmpl",
+                    "one/two",
                 ]
         self.faultyExamples = [
                     "@",
                     "@one",
-                    "/tmpl",
-                    "one/two",
                     "sdf@so/me",
                     "ho.rizeon@so.m"
                 ]
@@ -239,6 +245,62 @@ class TestLamiaMultiMountDeployment(UT.TestCase):
         self.assertEqual( aliases['runExec'][0][0]
                          , os.path.join(self.afsRoot, 'exec', 'run.sh') )
         self.assertTrue(os.path.isdir(os.path.join(self.afsRoot, 'logs')))
+
+    def test_abspath_before_deployment_via_resolve_mounts(self):
+        """
+        Regression test: abspath=True alias resolution must work BEFORE
+        create_on() ever runs, given an explicit resolve_mounts() call --
+        this is what a caller needs to prepare a file the deployment will
+        later reference (cf. adjust_detsdat_for_runs() resolving
+        `@localDetsDat' ahead of subtree deployment). Before this fix,
+        Paths.__call__(..., abspath=True) raised RuntimeError here, since
+        _resolvedRoots was only ever populated from inside create_on().
+        """
+        p = Paths(self.fStruct)
+        pathCtx = { 'runID' : 42, 'eosWorkDir' : self.eosRoot }
+        p.resolve_mounts( self.afsRoot, pathCtx )
+        self.assertEqual( p('inputFile', abspath=True, **pathCtx)
+                         , os.path.join(self.eosRoot, 'work', 'input.42.txt') )
+        self.assertEqual( p('runExec', abspath=True, **pathCtx)
+                         , os.path.join(self.afsRoot, 'exec', 'run.sh') )
+        # And a later create_on() pass still deploys correctly (resolving
+        # mounts again internally is idempotent, not a conflict).
+        aliases = p.create_on( self.afsRoot, pathCtx=pathCtx, tContext=Stack()
+                              , leafHandler=self._leaf_handler )
+        self.assertEqual( aliases['inputFile'][0][0]
+                         , os.path.join(self.eosRoot, 'work', 'input.42.txt') )
+
+    def test_abspath_without_resolve_mounts_raises_clearly(self):
+        """ The pre-fix failure mode should still fail loudly, not silently. """
+        p = Paths(self.fStruct)
+        with self.assertRaises(RuntimeError):
+            p('inputFile', abspath=True, runID=42, eosWorkDir=self.eosRoot)
+
+    def test_legacy_foreign_absolute_path_warns_not_raises(self):
+        """
+        A node name embedding a raw absolute path outside every declared
+        mount (the pre-`mounts:' hack still used by some fstructs, e.g.
+        `"/eos/.../{tag}@trafOutDir"') must still deploy there directly,
+        with a warning, rather than crashing outright -- restoring behavior
+        from before the multi-mount rewrite.
+        """
+        foreignRoot = tempfile.mkdtemp(prefix='lamia-test-foreign-')
+        try:
+            fStruct = dict(self.fStruct)
+            fStruct['foreign'] = {
+                '{}@foreignDir'.format(os.path.join(foreignRoot, 'out')) : None
+            }
+            p = Paths(fStruct)
+            pathCtx = { 'runID' : 1, 'eosWorkDir' : self.eosRoot }
+            with self.assertLogs(level='WARNING') as logs:
+                aliases = p.create_on( self.afsRoot, pathCtx=pathCtx, tContext=Stack()
+                                      , leafHandler=self._leaf_handler )
+            self.assertTrue(any('not within mount' in m for m in logs.output))
+            self.assertEqual( aliases['foreignDir'][0][0]
+                             , os.path.join(foreignRoot, 'out') )
+            self.assertTrue(os.path.isdir(os.path.join(foreignRoot, 'out')))
+        finally:
+            shutil.rmtree(foreignRoot, ignore_errors=True)
 
     def test_unknown_mount_reference_raises(self):
         """ A `_mount:' referencing an undeclared label fails loudly. """

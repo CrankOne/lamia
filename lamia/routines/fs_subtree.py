@@ -153,6 +153,15 @@ def contxtual_path( fstruct, env, base=None ):
     For given Paths() instance produces a shortcut function to
     lamia.core.filesystem.auto_path(), relying on current `pStk'.
     """
+    if base is not None and hasattr(fstruct, 'resolve_mounts'):
+        # Resolve the subtree's `mounts:' table right away, so abspath=True
+        # alias lookups below work even ahead of (or entirely without) an
+        # actual create_on()/deploy_fs_struct() pass over this Paths
+        # instance -- e.g. from adjust_detsdat_for_runs(), which needs
+        # @localDetsDat's real path *before* the subtree gets deployed, to
+        # prepare the file the deployment will later reference. Cheap and
+        # idempotent to redo later inside create_on() itself.
+        fstruct.resolve_mounts( base, env.pStk )
     def _ap( v, requireComplete=True, abspath=False, reflexive=False ):
         L = logging.getLogger(__name__)
         # Alias references carry their own mount association (possibly a
