@@ -213,6 +213,35 @@ class TestLamiaMultiMountDeployment(UT.TestCase):
         self.assertEqual( aliases['outDir'][0][0]
                          , os.path.join(self.eosRoot, 'work', 'sub', 'out') )
 
+    def test_mount_override_on_file_node(self):
+        """
+        A `_mount:' override directly inside a *file* leaf's description
+        dict (mixed with `id'/`mode') must be honored, not silently ignored
+        -- needed for flat sibling layouts (e.g. traf.yaml/eff.yaml, unlike
+        alignment.yaml, have the executable/logs/bulk-output entries as
+        direct siblings with no wrapping directory to hang `_mount:' on).
+        """
+        fStruct = {
+            'mounts' : { 'control' : '$root', 'data' : '{mounts[data]}' },
+            'run' : {
+                '_mount' : 'data',
+                '!run.sh@runExec' : { '_mount' : 'control', 'mode' : 0o755 },
+                '!opt.txt@runOpt' : 'plain, no override -> inherits data',
+            }
+        }
+        def _leaf_handler(template, destStream, path=None, context={}, contextHooks={}):
+            destStream.write(template if isinstance(template, str) else 'x')
+        p = Paths(fStruct)
+        aliases = p.create_on( self.afsRoot
+                              , pathCtx={ 'mounts' : { 'data' : self.eosRoot } }
+                              , tContext=Stack(), leafHandler=_leaf_handler )
+        self.assertEqual( aliases['runExec'][0][0]
+                         , os.path.join(self.afsRoot, 'run', 'run.sh') )
+        self.assertEqual( aliases['runOpt'][0][0]
+                         , os.path.join(self.eosRoot, 'run', 'opt.txt') )
+        self.assertTrue(os.path.isfile(os.path.join(self.afsRoot, 'run', 'run.sh')))
+        self.assertTrue(os.path.isfile(os.path.join(self.eosRoot, 'run', 'opt.txt')))
+
     def test_alias_abspath_matches_deployment(self):
         """
         Context-hook-style resolution (Paths.__call__(alias, abspath=True),
