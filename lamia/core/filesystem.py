@@ -27,7 +27,7 @@ import lamia.core.interpolation, lamia.core.configuration, lamia.confirm
 from enum import Enum
 from string import Formatter
 
-rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@/\n]+)(?:@(?P<alias>[_\-\w]+))?$'
+rxsFSStruct = r'^(?P<isFile>!?)(?P<nmTmpl>[^@\n]+)(?:@(?P<alias>[_\-\w]+))?$'
 rxFSStruct = re.compile(rxsFSStruct)
 rxFmtPat = re.compile(r'\{[^}\s]+\}')
 

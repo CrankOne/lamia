@@ -86,10 +86,14 @@ def setup_monitoring_on_dest( monitoringAddr
     api.set_host( p.hostname, p.port )
     if tags:
         api['tags'] = tags
+        L.debug( 'Task tags will be: ' + ', '.join(tags) )
     if comment:
         api['comment'] = comment
+        L.debug( 'Task comment will be "%s"'%comment )
     if username:
         api['username'] = username
+        L.debug( 'Task username is %s'%username )
     if email:
         api['emailNotify'] = email
+        L.debug( 'User notification mail is %s'%email )
     return api

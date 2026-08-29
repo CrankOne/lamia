@@ -112,6 +112,7 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
 
     def _mk_subm_classAd( self, nProcs, cad, submissionTag=None
             , jobName=None  # used only if monitoringAPI isn't None
+            , inputFiles=None
             , monitoringAPI=None ):
         L = logging.getLogger(__name__)
         # NOTE: the native `classad' module's instances seems to be pretty
@@ -181,6 +182,10 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
             # indicate an absent `submissionFile' parameter.
             L.warning( 'HTCondor submission file "%s" exists'
                     ' and will be overwritten.'%submissionFilePath )
+        # if input file(s) provided
+        if inputFiles:
+            cad['should_transfer_files'] = 'YES'
+            cad['transfer_input_files'] = ','.join(inputFiles)
         with open(submissionFilePath, 'w') as f:
             for k, v in cad.items():
                 if 'queue' == k:
@@ -217,7 +222,9 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                 , submissionTag=None
                 , backendArguments={}
                 , popenKwargs={}
-                , monitoringAPI=None ):
+                , inputFiles=None
+                , monitoringAPI=None
+                ):
         L = logging.getLogger(__name__)
         self.condorSubmitExec = cfg['execs.condorSubmit']
         self.condorSubmitArgs = copy.deepcopy(cfg['condorSubmit'])
@@ -231,13 +238,18 @@ class HTCondorShellSubmission(lamia.backend.interface.Submission):
                             '="%s"'%str(v) if v else '') )
         super().__init__(jobName, cmd, nProcs)
         baseAd = copy.deepcopy( cfg['classAds.submit'] )
-        baseAd.update({
-                'output' : stdout.format(**self.macros()),
-                'error' : stderr.format(**self.macros()),
-            })
+        if stdout:
+            baseAd.update({'output' : stdout.format(**self.macros())})
+        elif 'output' in baseAd.keys():
+            del baseAd['output']
+        if stderr:
+            baseAd.update({'error'  : stderr.format(**self.macros())})
+        elif 'error' in baseAd.keys():
+            del baseAd['error']
         self.submissionFilePath = self._mk_subm_classAd( nProcs, baseAd
                 , submissionTag=submissionTag
                 , monitoringAPI=monitoringAPI
+                , inputFiles=inputFiles
                 , jobName=jobName )
         self.cmd = [ cfg['execs.condorSubmit'], self.submissionFilePath
                , '-terse'

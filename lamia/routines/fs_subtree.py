@@ -122,10 +122,11 @@ def parse_fstruct( fstruct, fstructConf='default'
                 L.error('Path "%s" seems to contain formatting pattern'
                         ' but no path-formatting context being set at the'
                         ' moment.'%fstruct )
+        L.info('Using fstruct at %s'%fstruct)
         with open(fstruct) as f:
-            fStrObj = yaml.load(f)
+            fStrObj = yaml.load(f, Loader=yaml.FullLoader)
     else:
-        fStrObj = yaml.load(fstruct)
+        fStrObj = yaml.load(fstruct, Loader=yaml.FullLoader)
     fStrVer = distutils.version.LooseVersion('%s'%fStrObj.get('version', '0.0'))
     if fStrVer > distutils.version.LooseVersion('0.1'):
         L.warning( "File structure version %s might be"
