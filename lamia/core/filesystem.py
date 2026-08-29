@@ -702,6 +702,14 @@ class Paths( collections.MutableMapping ):
             fileRelTemplatePath = os.path.join(*(path+[nm]))
             L.debug( 'FS entry(-ies) "%s" will be considered as a file(s).'
                     , fileRelTemplatePath )
+            if type(value) is dict and gReservedMountKey in value:
+                # A file leaf's description dict (mixed with `id'/`mode'/
+                # `contextHooks'/`conditions') may carry its own `_mount'
+                # override too -- unlike directory nodes, a file has no
+                # children dict of its own for _treat_expression() to strip
+                # this from, so it's handled here instead.
+                value = dict(value)
+                self._mounts[fileRelTemplatePath] = value.pop(gReservedMountKey)
             self._files[fileRelTemplatePath] = value
             v = None
         else:
