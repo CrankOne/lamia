@@ -327,7 +327,23 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         """
         return HTCondorShellSubmission( jobName, self.cfg, monitoringAPI=self.monitoringAPI, **kwargs )
 
-    def dispatch_jobs(self, js, DAGFilePath=None):
+    def dispatch_jobs(self, js, DAGFilePath=None, nodeJobFailureTolerance=None):
+        """
+        `nodeJobFailureTolerance', if given, is written as this DAG's own
+        DAGMAN_NODE_JOB_FAILURE_TOLERANCE (via a generated `CONFIG <file>'
+        DAG-file statement, HTCondor's documented per-DAG override
+        mechanism for DAGMAN_* config macros): the number of jobs within a
+        single node's cluster that may fail before DAGMan considers that
+        node (and, transitively, the whole DAG) failed. Default is 0 (any
+        single failure fails the node, and every other job still queued
+        for that node's cluster gets removed) if left unset.
+        NOTE: this is a single value applied to *every* node in the DAG,
+        not just multi-proc ones -- a single-proc node (nProcs=1, e.g. this
+        codebase's chck/algn jobs) tolerates up to this same count too,
+        which for any tolerance >= 1 means that lone job's own failure no
+        longer fails the DAG either. Pick a value with that in mind, not
+        just by looking at the largest cluster's size.
+        """
         L = logging.getLogger(__name__)
         if isinstance(js, HTCondorShellSubmission):
             if not js.dependencies:
@@ -385,8 +401,17 @@ class HTCondorShellBackend(lamia.backend.interface.BatchBackend):
         #    #assert(False)  # XXX
         #    self.monitoringAPI[''] = ...
         # _________
+        dagContent = dagf.getvalue()
+        if nodeJobFailureTolerance is not None:
+            dagConfigPath = DAGFilePath + '.dagman.config'
+            with open(dagConfigPath, 'w') as cf:
+                cf.write('DAGMAN_NODE_JOB_FAILURE_TOLERANCE = %d\n'%int(nodeJobFailureTolerance))
+            # `CONFIG' must be the DAG file's own first statement.
+            dagContent = 'CONFIG %s\n'%dagConfigPath + dagContent
+            L.info('Node job failure tolerance set to %d (%s).'%(
+                    int(nodeJobFailureTolerance), dagConfigPath))
         with open(DAGFilePath, 'w') as f:
-            f.write(dagf.getvalue())
+            f.write(dagContent)
         sCmd = [self.cfg['execs']['submitDAG'], '-force', DAGFilePath]
         try:
             submJob = subprocess.Popen( sCmd, stdout=subprocess.PIPE
